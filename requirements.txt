@@ -1,0 +1,7 @@
+python-dotenv
+pydantic-settings
+alembic
+aiosqlite
+sqlalchemy
+authlib
+fastapi[standard]
