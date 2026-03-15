@@ -1,0 +1,10 @@
+export const APP_NAME = "When games?";
+export const SESSION_COOKIE = "whengames_session";
+export const HALF_HOUR = 30;
+export const WEEK_MINUTES = 24 * 60;
+export const SLOT_STATES = ["blank", "can", "maybe", "cant"] as const;
+export const DEFAULT_TIMEZONE = "UTC";
+export const DEFAULT_WEEK_START = 0;
+export const DAYS_IN_WEEK = 7;
+export const TIME_ROWS = Array.from({ length: 48 }, (_, index) => index * HALF_HOUR);
+export const DRAG_HOVER_DEBOUNCE_MS = 12;
