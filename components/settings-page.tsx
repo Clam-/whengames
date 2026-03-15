@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useMutation } from "convex/react";
 
@@ -62,9 +63,9 @@ export function SettingsPage() {
             <div className="eyebrow">Account</div>
             <h1 className="display">Viewer settings</h1>
           </div>
-          <a className="button" href="/">
+          <Link className="button" href="/">
             Back
-          </a>
+          </Link>
         </div>
         <form className="stack" onSubmit={handleSave}>
           <div>

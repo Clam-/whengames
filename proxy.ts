@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-export const middleware = (request: NextRequest) => {
+export const proxy = (request: NextRequest) => {
   const response = NextResponse.next();
   response.headers.set("Accept-CH", "Sec-CH-Timezone");
   response.headers.set("Critical-CH", "Sec-CH-Timezone");

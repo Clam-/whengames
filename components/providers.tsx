@@ -29,8 +29,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<ViewerSession | null>(null);
   const [user, setUser] = useState<PublicUser | null>(null);
 
-  const refresh = async () => {
-    setIsLoading(true);
+  const fetchViewer = async () => {
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const response = await fetch("/api/session", {
       headers: {
@@ -42,13 +41,35 @@ export function Providers({ children }: { children: React.ReactNode }) {
       session: ViewerSession;
       user: PublicUser;
     };
+    return payload;
+  };
+
+  const refresh = async () => {
+    setIsLoading(true);
+    const payload = await fetchViewer();
     setSession(payload.session);
     setUser(payload.user);
     setIsLoading(false);
   };
 
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+
+    const loadInitialViewer = async () => {
+      const payload = await fetchViewer();
+      if (cancelled) {
+        return;
+      }
+      setSession(payload.session);
+      setUser(payload.user);
+      setIsLoading(false);
+    };
+
+    void loadInitialViewer();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (
