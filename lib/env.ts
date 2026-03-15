@@ -10,7 +10,6 @@ export const env = {
   workosApiKey: () => read("WORKOS_API_KEY"),
   workosClientId: () => read("WORKOS_CLIENT_ID"),
   workosRedirectUri: () => read("WORKOS_REDIRECT_URI"),
-  workosConnectionId: () => read("WORKOS_CONNECTION_ID"),
   sessionSecret: () => read("WORKOS_COOKIE_SECRET"),
   mailFrom: () => process.env.MAIL_FROM,
   mailHost: () => process.env.MAIL_HOST,

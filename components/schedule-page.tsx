@@ -7,6 +7,7 @@ import { Temporal } from "@js-temporal/polyfill";
 import { useMutation, useQuery } from "convex/react";
 
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { TIME_ROWS } from "@/lib/constants";
 import {
   cellKeyForInstant,
@@ -23,7 +24,7 @@ import { useViewer } from "@/components/providers";
 type SelectionMode = "availability" | "selected";
 
 type AvailabilityEntry = {
-  ownerUserId: string;
+  ownerUserId: Id<"users">;
   scope: "oneOff" | "weekly" | "exception";
   state: SlotState;
   timezone: string;
@@ -43,7 +44,7 @@ type SelectedSlotEntry = {
 
 type ScheduleData = {
   schedule: {
-    _id: string;
+    _id: Id<"schedules">;
     title: string;
     description?: string;
     kind: "oneOff" | "weekly";
@@ -51,7 +52,7 @@ type ScheduleData = {
     dateRangeStartMs?: number;
     dateRangeEndMs?: number;
   };
-  creatorId: string | null;
+  creatorId: Id<"users"> | null;
   users: PublicUser[];
   availability: AvailabilityEntry[];
   selectedSlots: SelectedSlotEntry[];
@@ -91,6 +92,8 @@ export function SchedulePage({ slug }: { slug: string }) {
   const [anchorDate, setAnchorDate] = useState(currentWeekAnchor);
   const [selectionMode, setSelectionMode] = useState<SelectionMode>("availability");
   const [pendingName, setPendingName] = useState(user?.displayName ?? "");
+  const [nameError, setNameError] = useState("");
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<{
     active: boolean;
     moved: boolean;
@@ -126,7 +129,7 @@ export function SchedulePage({ slug }: { slug: string }) {
     const viewerStateByCell = new Map<string, SlotState>();
     const selectedCells = new Set<string>();
 
-    const putUser = (cellKey: string, ownerUserId: string, state: SlotState) => {
+    const putUser = (cellKey: string, ownerUserId: PublicUser["_id"], state: SlotState) => {
       if (state === "blank") {
         return;
       }
@@ -237,14 +240,33 @@ export function SchedulePage({ slug }: { slug: string }) {
       ? "weekly"
       : "exception";
   const selectedScope = scheduleData.schedule.kind === "weekly" && !isBaseWeek ? "oneOff" : scheduleData.schedule.kind;
-  const nameRequired = user?.kind === "anonymous" && (!user.displayName || user.displayName === "Anonymous player");
+  const nameRequired = user?.kind === "anonymous" && !user.displayName.trim();
+
+  const validatePendingName = () => {
+    if (pendingName.trim()) {
+      setNameError("");
+      if (nameInputRef.current) {
+        nameInputRef.current.setCustomValidity("");
+      }
+      return true;
+    }
+
+    const message = "Display name is required before editing availability.";
+    setNameError(message);
+    if (nameInputRef.current) {
+      nameInputRef.current.setCustomValidity(message);
+      nameInputRef.current.reportValidity();
+      nameInputRef.current.focus();
+    }
+    return false;
+  };
 
   const persistName = async () => {
-    if (!user?._id || !pendingName.trim()) {
+    if (!user?._id || !validatePendingName()) {
       return;
     }
     await saveViewerSettings({
-      userId: user._id as never,
+      userId: user._id,
       displayName: pendingName,
       timezone: user.timezone,
       weekStartsOn: user.weekStartsOn,
@@ -258,8 +280,10 @@ export function SchedulePage({ slug }: { slug: string }) {
     ((scheduleData.schedule.dateRangeStartMs != null && instantMs < scheduleData.schedule.dateRangeStartMs) ||
       (scheduleData.schedule.dateRangeEndMs != null && instantMs >= scheduleData.schedule.dateRangeEndMs));
 
+  const availabilityEditingBlocked = !user?._id || nameRequired;
+
   const applyAvailability = async (targets: Array<{ dateKey: string; minuteOfDay: number; instantMs: number }>, state: SlotState) => {
-    if (!user?._id || nameRequired) {
+    if (availabilityEditingBlocked) {
       return;
     }
     await setAvailabilityBulk({
@@ -267,7 +291,7 @@ export function SchedulePage({ slug }: { slug: string }) {
         .filter((target) => !disabledCell(target.instantMs))
         .map((target) => ({
           scheduleId: scheduleData.schedule._id,
-          ownerUserId: user._id as never,
+          ownerUserId: user._id,
           scope: currentScope,
           state,
           timezone: user.timezone,
@@ -287,7 +311,7 @@ export function SchedulePage({ slug }: { slug: string }) {
     }
     await syncSelectedSlots({
       scheduleId: scheduleData.schedule._id,
-      actorUserId: user._id as never,
+      actorUserId: user._id,
       upserts: select
         ? targets.map((target) => ({
             scope: selectedScope as "oneOff" | "weekly",
@@ -358,6 +382,12 @@ export function SchedulePage({ slug }: { slug: string }) {
     if (disabledCell(cell.instantMs)) {
       return;
     }
+    if (selectionMode === "availability" && availabilityEditingBlocked) {
+      if (nameRequired) {
+        validatePendingName();
+      }
+      return;
+    }
     if (selectionMode === "selected") {
       dragRef.current = {
         active: true,
@@ -405,7 +435,7 @@ export function SchedulePage({ slug }: { slug: string }) {
               Home
             </Link>
             <a className="button" href={`/api/auth/workos/login?returnTo=/schedules/${slug}`}>
-              Log
+              Login
             </a>
             <Link className="button ghost" href="/settings">
               Account
@@ -419,24 +449,33 @@ export function SchedulePage({ slug }: { slug: string }) {
               <div>
                 <label className="label">Display name</label>
                 <input
-                  className="field"
+                  ref={nameInputRef}
+                  className={clsx("field", nameError && "is-invalid")}
                   value={pendingName}
                   placeholder="Required before grid edits"
-                  onChange={(event) => setPendingName(event.target.value)}
+                  required
+                  onChange={(event) => {
+                    setPendingName(event.target.value);
+                    if (event.target.value.trim()) {
+                      setNameError("");
+                      event.target.setCustomValidity("");
+                    }
+                  }}
                 />
+                {nameError ? <div className="input-error">{nameError}</div> : null}
               </div>
               <div className="button-row">
                 <button className="button primary" onClick={() => void persistName()}>
                   Save name
                 </button>
                 <a className="button" href={`/api/auth/workos/login?returnTo=/schedules/${slug}`}>
-                  Log for DST notices
+                  Login for DST notices
                 </a>
               </div>
             </div>
             <div className="muted">
               Anonymous entries are stored in your cookie session and merge into the logged-in account
-              after SSO.
+              after login.
             </div>
           </div>
         ) : null}
@@ -495,6 +534,11 @@ export function SchedulePage({ slug }: { slug: string }) {
                   ? "one-off weekly exceptions"
                   : "one-off fixed slots"}
             </strong>.
+            {selectionMode === "availability" && availabilityEditingBlocked ? (
+              <>
+                {" "}Save a display name before editing availability.
+              </>
+            ) : null}
           </div>
           <div className="legend">
             <span className="legend-chip can">Can do</span>
@@ -524,7 +568,9 @@ export function SchedulePage({ slug }: { slug: string }) {
                 viewerTimezone={viewerTimezone}
                 built={built}
                 currentCellKey={currentCellKey}
-                disabledCell={disabledCell}
+                disabledCell={(instantMs) =>
+                  disabledCell(instantMs) || (selectionMode === "availability" && availabilityEditingBlocked)
+                }
                 onCellPointerDown={onCellPointerDown}
                 onCellEnter={onCellEnter}
                 onCellPointerUp={finishDrag}

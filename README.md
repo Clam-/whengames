@@ -1,12 +1,12 @@
 # When games?
 
-Timezone-aware public scheduling built with TypeScript, Next.js, Convex, and WorkOS SSO.
+Timezone-aware public scheduling built with TypeScript, Next.js, Convex, and WorkOS AuthKit.
 
 ## Features
 
-- Public home page listing schedules plus `Create schedule`, `Log`, and `Account` actions
+- Public home page listing schedules plus `Create schedule`, `Login`, and `Account` actions
 - Cookie-backed anonymous viewers with required display name entry before editing
-- WorkOS SSO login flow with anonymous availability merged into the SSO user
+- WorkOS AuthKit login flow with anonymous availability merged into the logged-in user
 - One-off schedules with a bounded visible date range
 - Weekly schedules with a compact half-hour grid, week pagination, and future one-off exceptions
 - Quad-state availability cells: blank, can do, maybe, can't do
@@ -20,12 +20,15 @@ Timezone-aware public scheduling built with TypeScript, Next.js, Convex, and Wor
 
 1. Copy `.env.example` to `.env.local`.
 2. Configure a Convex deployment and set `NEXT_PUBLIC_CONVEX_URL` and `CONVEX_DEPLOYMENT`.
-3. Configure a WorkOS SSO connection and set:
+3. Configure WorkOS AuthKit and set:
    - `WORKOS_API_KEY`
    - `WORKOS_CLIENT_ID`
    - `WORKOS_REDIRECT_URI`
-   - `WORKOS_CONNECTION_ID`
    - `WORKOS_COOKIE_SECRET`
+   - Enable the social and email providers you want in the WorkOS AuthKit dashboard, such as
+     Google login.
+   - `WORKOS_COOKIE_SECRET` should be a long random string because the app uses it for both its
+     own session cookie signing and WorkOS sealed session storage.
 4. Configure mailer env vars if you want DST email notices enabled.
 5. Install and run:
 

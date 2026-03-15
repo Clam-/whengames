@@ -1,15 +1,18 @@
+import type { Id } from "@/convex/_generated/dataModel";
+
 export type SlotState = "blank" | "can" | "maybe" | "cant";
 
 export type ScheduleKind = "oneOff" | "weekly";
 
 export type ViewerSession = {
   anonymousToken: string;
-  userId?: string;
+  userId?: Id<"users">;
   timezoneHint?: string;
+  workosSession?: string;
 };
 
 export type PublicUser = {
-  _id: string;
+  _id: Id<"users">;
   displayName: string;
   avatarUrl?: string;
   email?: string;
@@ -20,7 +23,7 @@ export type PublicUser = {
 };
 
 export type ScheduleSummary = {
-  _id: string;
+  _id: Id<"schedules">;
   slug: string;
   title: string;
   description?: string;
@@ -40,7 +43,7 @@ export type GridCell = {
 
 export type GridEntry = {
   cellKey: string;
-  userId: string;
+  userId: Id<"users">;
   state: SlotState;
   avatarUrl?: string;
   displayName: string;

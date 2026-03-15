@@ -46,7 +46,7 @@ export function HomePage() {
           ? instantRangeForDates(startDate, endDate, timezone)
           : undefined;
       const schedule = await createSchedule({
-        creatorUserId: user._id as never,
+        creatorUserId: user._id,
         title,
         description,
         kind,
@@ -77,7 +77,7 @@ export function HomePage() {
               {showCreate ? "Close create" : "Create schedule"}
             </button>
             <a className="button" href="/api/auth/workos/login?returnTo=/">
-              Log
+              Login
             </a>
             <Link className="button ghost" href="/settings">
               Account
@@ -87,9 +87,9 @@ export function HomePage() {
         <div className="hero-card">
           <div className="eyebrow">Viewer</div>
           <div className="hero-user">
-            <strong>{isLoading ? "Loading..." : user?.displayName ?? "Anonymous player"}</strong>
+            <strong>{isLoading ? "Loading..." : user?.displayName.trim() || "Anonymous viewer"}</strong>
             <span className="muted">
-              {user?.kind === "sso" ? user.email ?? "SSO account" : "Anonymous cookie session"}
+              {user?.kind === "sso" ? user.email ?? "Logged-in account" : "Anonymous cookie session"}
             </span>
             <span className="muted">{user?.timezone ?? "Detecting timezone"}</span>
           </div>

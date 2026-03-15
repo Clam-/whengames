@@ -18,6 +18,7 @@ export function SettingsPage() {
   const [weekStartsOn, setWeekStartsOn] = useState(0);
   const [dstNotifications, setDstNotifications] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [nameError, setNameError] = useState("");
 
   useEffect(() => {
     if (!user) {
@@ -34,10 +35,14 @@ export function SettingsPage() {
     if (!user?._id) {
       return;
     }
+    if (!displayName.trim()) {
+      setNameError("Display name is required.");
+      return;
+    }
     setIsSaving(true);
     try {
       await saveViewerSettings({
-        userId: user._id as never,
+        userId: user._id,
         displayName,
         timezone,
         weekStartsOn,
@@ -65,10 +70,16 @@ export function SettingsPage() {
           <div>
             <label className="label">Display name</label>
             <input
-              className="field"
+              className={nameError ? "field is-invalid" : "field"}
               value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
+              onChange={(event) => {
+                setDisplayName(event.target.value);
+                if (event.target.value.trim()) {
+                  setNameError("");
+                }
+              }}
             />
+            {nameError ? <div className="input-error">{nameError}</div> : null}
           </div>
           <div className="grid-two">
             <div>
@@ -113,7 +124,7 @@ export function SettingsPage() {
           {user?.kind !== "sso" ? (
             <p className="muted">
               Anonymous viewers can keep a display name here, but DST mail requires using the
-              single “Log” SSO flow.
+              login flow.
             </p>
           ) : null}
           <div className="button-row">

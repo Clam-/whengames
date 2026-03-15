@@ -7,9 +7,10 @@ import { env } from "@/lib/env";
 export const getWorkos = () => new WorkOS(env.workosApiKey());
 
 export const buildWorkosAuthorizeUrl = (state: string) =>
-  getWorkos().sso.getAuthorizationUrl({
-    connection: env.workosConnectionId(),
+  getWorkos().userManagement.getAuthorizationUrl({
     clientId: env.workosClientId(),
     redirectUri: env.workosRedirectUri(),
-    state
+    state,
+    provider: "authkit",
+    screenHint: "sign-in"
   });

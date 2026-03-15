@@ -4,7 +4,8 @@ import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 
-const sanitizeDisplayName = (value: string) => value.trim().slice(0, 60) || "Anonymous player";
+const sanitizeDisplayName = (value: string) => value.trim().slice(0, 60);
+const hasDisplayName = (value?: string) => Boolean(value?.trim());
 
 const publicUser = (user: Doc<"users">) => ({
   _id: user._id,
@@ -39,7 +40,7 @@ export const ensureAnonymousViewer = mutation({
     const userId = await ctx.db.insert("users", {
       kind: "anonymous",
       anonymousToken: args.anonymousToken,
-      displayName: "Anonymous player",
+      displayName: "",
       timezone: args.timezoneHint ?? "UTC",
       weekStartsOn: 0,
       dstNotifications: true,
@@ -116,7 +117,7 @@ export const upsertWorkosViewer = mutation({
         kind: "sso",
         email: args.email,
         displayName:
-          sourceUser && sourceUser.displayName !== "Anonymous player"
+          sourceUser && hasDisplayName(sourceUser.displayName)
             ? sanitizeDisplayName(sourceUser.displayName)
             : sanitizeDisplayName(args.displayName),
         avatarUrl: args.avatarUrl,
@@ -132,7 +133,7 @@ export const upsertWorkosViewer = mutation({
         workosUserId: args.workosUserId,
         email: args.email,
         displayName:
-          sourceUser && sourceUser.displayName !== "Anonymous player"
+          sourceUser && hasDisplayName(sourceUser.displayName)
             ? sanitizeDisplayName(sourceUser.displayName)
             : sanitizeDisplayName(args.displayName),
         avatarUrl: args.avatarUrl,

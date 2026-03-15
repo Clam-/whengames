@@ -123,6 +123,16 @@ textarea {
   padding: 10px 12px;
 }
 
+.field.is-invalid {
+  border-color: rgba(179, 77, 67, 0.9);
+}
+
+.input-error {
+  margin-top: 6px;
+  font-size: 0.82rem;
+  color: rgb(140, 56, 48);
+}
+
 .label {
   font-size: 0.82rem;
   color: var(--muted);

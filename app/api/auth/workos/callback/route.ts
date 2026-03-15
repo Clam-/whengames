@@ -10,6 +10,13 @@ import { getWorkos } from "@/lib/workos";
 
 const fallbackRedirect = "/";
 
+const sanitizeReturnTo = (value: string | undefined) => {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+    return fallbackRedirect;
+  }
+  return value;
+};
+
 const decodeState = (value: string | null) => {
   if (!value) {
     return fallbackRedirect;
@@ -18,7 +25,7 @@ const decodeState = (value: string | null) => {
     const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as {
       returnTo?: string;
     };
-    return decoded.returnTo || fallbackRedirect;
+    return sanitizeReturnTo(decoded.returnTo);
   } catch {
     return fallbackRedirect;
   }
@@ -33,25 +40,27 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL(returnTo, env.appUrl()));
   }
 
-  const { profile } = await getWorkos().sso.getProfileAndToken({
+  const authResponse = await getWorkos().userManagement.authenticateWithCode({
     code,
-    clientId: env.workosClientId()
+    clientId: env.workosClientId(),
+    session: {
+      sealSession: true,
+      cookiePassword: env.sessionSecret()
+    }
   });
   const existingSession = await readViewerSession();
   const timezoneHint = await inferTimezoneHint();
   const displayName =
-    [profile.firstName, profile.lastName].filter(Boolean).join(" ").trim() || profile.email;
-  const avatarUrl =
-    typeof profile.rawAttributes?.picture === "string"
-      ? profile.rawAttributes.picture
-      : undefined;
+    [authResponse.user.firstName, authResponse.user.lastName].filter(Boolean).join(" ").trim() ||
+    authResponse.user.email;
+  const avatarUrl = authResponse.user.profilePictureUrl ?? undefined;
 
   const user = await getConvexHttp().mutation(api.users.upsertWorkosViewer, {
-    anonymousUserId: existingSession?.userId as never,
+    anonymousUserId: existingSession?.userId,
     anonymousToken: existingSession?.anonymousToken,
     timezoneHint,
-    workosUserId: profile.id,
-    email: profile.email,
+    workosUserId: authResponse.user.id,
+    email: authResponse.user.email,
     displayName,
     avatarUrl
   });
@@ -59,7 +68,8 @@ export async function GET(request: Request) {
   await writeViewerSession({
     anonymousToken: existingSession?.anonymousToken ?? crypto.randomUUID(),
     userId: user._id,
-    timezoneHint
+    timezoneHint,
+    workosSession: authResponse.sealedSession
   });
 
   return NextResponse.redirect(new URL(returnTo, env.appUrl()));

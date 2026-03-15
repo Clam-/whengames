@@ -25,7 +25,7 @@ const ensureViewer = async () => {
 
   const user =
     existingSession.userId
-      ? await getConvexHttp().query(api.users.getViewer, { userId: existingSession.userId as never })
+      ? await getConvexHttp().query(api.users.getViewer, { userId: existingSession.userId })
       : null;
 
   if (user) {
@@ -44,7 +44,8 @@ const ensureViewer = async () => {
   const nextSession = {
     anonymousToken: existingSession.anonymousToken,
     userId: anonymousUser._id,
-    timezoneHint
+    timezoneHint,
+    workosSession: existingSession.workosSession
   };
   await writeViewerSession(nextSession);
   return { session: nextSession, user: anonymousUser };
