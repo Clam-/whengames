@@ -394,6 +394,41 @@ export const ensureAuthProfile = mutation({
   },
 });
 
+// Unlink SSO and convert back to anonymous/cookie-based account
+export const unlinkSso = mutation({
+  args: {
+    profileId: v.id("userProfiles"),
+    newAnonymousId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const profile = await ctx.db.get(args.profileId);
+    if (!profile) throw new Error("Profile not found");
+    if (!profile.authUserId) throw new Error("Profile is not linked to SSO");
+
+    // If display name is empty or not set, use the SSO name before unlinking
+    const authUser = await ctx.db.get(
+      profile.authUserId as Id<"users">
+    );
+    const ssoName = authUser?.name;
+
+    const updates: Record<string, unknown> = {
+      authUserId: undefined,
+      anonymousId: args.newAnonymousId,
+      email: undefined,
+      profileImageUrl: undefined,
+    };
+
+    // If display name was cleared (to use SSO name), restore the SSO name
+    if (!profile.displayName || profile.displayName.trim() === "") {
+      updates.displayName = ssoName || "Anonymous";
+    }
+
+    await ctx.db.patch(args.profileId, updates);
+
+    return { displayName: (updates.displayName as string) || profile.displayName };
+  },
+});
+
 // Get a profile by ID
 export const getProfile = query({
   args: { profileId: v.id("userProfiles") },

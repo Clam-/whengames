@@ -24,11 +24,12 @@ export function CreateScheduleModal({ onClose }: Props) {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [type, setType] = useState<"one-off" | "recurring">("one-off");
+  const [type, setType] = useState<"one-off" | "recurring">("recurring");
   const [dateStart, setDateStart] = useState("");
   const [dateEnd, setDateEnd] = useState("");
   const [recurringStartDate, setRecurringStartDate] = useState("");
   const [creatorName, setCreatorName] = useState(displayName || "");
+  const [isPrivate, setIsPrivate] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -62,6 +63,7 @@ export function CreateScheduleModal({ onClose }: Props) {
         dateRangeEnd: type === "one-off" ? dateEnd : undefined,
         recurringStartDate: type === "recurring" && recurringStartDate ? recurringStartDate : undefined,
         creatorTimezone: timezone || detectTimezone(),
+        isPrivate: isPrivate || undefined,
       });
 
       navigate(`/schedule/${scheduleId}`);
@@ -206,8 +208,28 @@ export function CreateScheduleModal({ onClose }: Props) {
             </div>
           )}
 
+          <div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="is-private"
+                checked={isPrivate}
+                onChange={(e) => setIsPrivate(e.target.checked)}
+                className="rounded text-blue-600"
+              />
+              <label htmlFor="is-private" className="text-sm text-gray-700">
+                Private schedule
+              </label>
+            </div>
+            {isPrivate && (
+              <p className="text-xs text-gray-500 mt-1 ml-6">
+                Private schedules can still be viewed by anyone with the link to this schedule.
+              </p>
+            )}
+          </div>
+
           <div className="text-xs text-gray-400">
-            Timezone: {timezone}
+            My timezone: {timezone}. Others will see schedules in their own timezone.
           </div>
 
           <div className="flex justify-end gap-3 pt-2">

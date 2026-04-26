@@ -51,6 +51,7 @@ export default defineSchema({
       )
     ),
     isLocked: v.optional(v.boolean()),
+    isPrivate: v.optional(v.boolean()),
     createdAt: v.number(),
   })
     .index("by_creatorProfileId", ["creatorProfileId"])

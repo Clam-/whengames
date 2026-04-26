@@ -11,9 +11,12 @@ export const list = query({
       .order("desc")
       .collect();
 
+    // Filter out private schedules
+    const publicSchedules = schedules.filter((s) => !s.isPrivate);
+
     // Enrich with creator profile info
     const enriched = await Promise.all(
-      schedules.map(async (schedule) => {
+      publicSchedules.map(async (schedule) => {
         const creator = await ctx.db.get(schedule.creatorProfileId);
         return {
           ...schedule,
@@ -83,6 +86,7 @@ export const create = mutation({
     dateRangeEnd: v.optional(v.string()),
     recurringStartDate: v.optional(v.string()),
     creatorTimezone: v.string(),
+    isPrivate: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     return await ctx.db.insert("schedules", {
@@ -94,6 +98,7 @@ export const create = mutation({
       dateRangeEnd: args.dateRangeEnd,
       recurringStartDate: args.recurringStartDate,
       creatorTimezone: args.creatorTimezone,
+      isPrivate: args.isPrivate,
       createdAt: Date.now(),
     });
   },

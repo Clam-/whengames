@@ -337,12 +337,28 @@ export function ScheduleView() {
                   by {schedule.creatorName}
                 </span>
                 <span className="text-xs text-gray-400">
-                  TZ: {timezone}
+                  My timezone: {timezone}
                 </span>
               </div>
             </div>
           </div>
         </div>
+
+        {/* Non-current week banner for recurring schedules */}
+        {schedule.type === "recurring" && weekOffset !== 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+            <p className="text-sm text-amber-800">
+              Nomination changes made on non-current weeks are one-off exceptions.{" "}
+              <button
+                onClick={() => setWeekOffset(0)}
+                className="text-amber-900 font-medium underline hover:text-amber-700"
+              >
+                Click 'Today'
+              </button>{" "}
+              to update nominations for recurring weeks.
+            </p>
+          </div>
+        )}
 
         {/* Anonymous user prompt */}
         {!canInteract && !isAuthenticated && (

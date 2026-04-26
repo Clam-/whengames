@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useMutation } from "convex/react";
+import { useAuthActions } from "@convex-dev/auth/react";
 import { api } from "../../convex/_generated/api";
 import { getCommonTimezones } from "../lib/timezone";
 import { Id } from "../../convex/_generated/dataModel";
@@ -35,8 +36,100 @@ const DAY_NAMES = [
   "Saturday",
 ];
 
+const ANON_ID_KEY = "whengames_anonymous_id";
+const ANON_NAME_KEY = "whengames_anonymous_name";
+
+function formatTzLabel(tz: string): string {
+  // "America/New_York" -> "New York (America)"
+  const parts = tz.split("/");
+  if (parts.length === 1) return tz;
+  const city = parts[parts.length - 1].replace(/_/g, " ");
+  const region = parts.slice(0, -1).join("/");
+  return `${city} (${region})`;
+}
+
+function TimezoneSearchSelect({
+  value,
+  onChange,
+  search,
+  onSearchChange,
+}: {
+  value: string;
+  onChange: (tz: string) => void;
+  search: string;
+  onSearchChange: (s: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const allTimezones = useMemo(() => getCommonTimezones(), []);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return allTimezones;
+    const q = search.toLowerCase();
+    return allTimezones.filter(
+      (tz) =>
+        tz.toLowerCase().includes(q) ||
+        formatTzLabel(tz).toLowerCase().includes(q)
+    );
+  }, [allTimezones, search]);
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={isOpen ? search : value}
+        onChange={(e) => {
+          onSearchChange(e.target.value);
+          if (!isOpen) setIsOpen(true);
+        }}
+        onFocus={() => {
+          setIsOpen(true);
+          onSearchChange("");
+        }}
+        onBlur={() => {
+          // Delay to allow click on option
+          setTimeout(() => setIsOpen(false), 200);
+        }}
+        placeholder="Search timezones..."
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+      {isOpen && (
+        <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-400">
+              No matching timezones
+            </div>
+          ) : (
+            filtered.map((tz) => (
+              <button
+                key={tz}
+                type="button"
+                className={`w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50 ${
+                  tz === value
+                    ? "bg-blue-100 text-blue-700 font-medium"
+                    : "text-gray-700"
+                }`}
+                onMouseDown={(e) => {
+                  e.preventDefault(); // Prevent blur
+                  onChange(tz);
+                  onSearchChange("");
+                  setIsOpen(false);
+                }}
+              >
+                {formatTzLabel(tz)}
+                <span className="text-xs text-gray-400 ml-1">({tz})</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function UserSettingsModal({ profile, onClose }: Props) {
   const updateProfile = useMutation(api.users.updateProfile);
+  const unlinkSso = useMutation(api.users.unlinkSso);
+  const { signOut } = useAuthActions();
 
   const [displayName, setDisplayName] = useState(profile.displayName);
   const [timezone, setTimezone] = useState(profile.timezone);
@@ -45,6 +138,36 @@ export function UserSettingsModal({ profile, onClose }: Props) {
     profile.dstNotifications
   );
   const [saving, setSaving] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
+  const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
+  const [timezoneSearch, setTimezoneSearch] = useState("");
+
+  const handleUnlink = async () => {
+    setUnlinking(true);
+    try {
+      // Generate a new anonymous ID
+      const newAnonymousId = crypto.randomUUID();
+
+      const result = await unlinkSso({
+        profileId: profile._id,
+        newAnonymousId,
+      });
+
+      // Store the new anonymous identity in localStorage
+      localStorage.setItem(ANON_ID_KEY, newAnonymousId);
+      localStorage.setItem(ANON_NAME_KEY, result.displayName);
+
+      // Sign out of SSO
+      await signOut();
+      setShowUnlinkConfirm(false);
+      onClose();
+      window.location.reload();
+    } catch (err) {
+      console.error("Failed to unlink SSO:", err);
+    } finally {
+      setUnlinking(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -100,6 +223,36 @@ export function UserSettingsModal({ profile, onClose }: Props) {
                     {profile.ssoEmail && (
                       <p className="text-blue-700">{profile.ssoEmail}</p>
                     )}
+                    {!showUnlinkConfirm ? (
+                      <button
+                        onClick={() => setShowUnlinkConfirm(true)}
+                        className="mt-2 text-xs text-red-600 hover:text-red-700 underline"
+                      >
+                        Unlink SSO &amp; convert to cookie account
+                      </button>
+                    ) : (
+                      <div className="mt-2 bg-red-50 border border-red-200 rounded p-2">
+                        <p className="text-xs text-red-700 mb-2">
+                          This will disconnect your Google account. Your data
+                          will be stored only in this browser. Are you sure?
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handleUnlink}
+                            disabled={unlinking}
+                            className="text-xs bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700 disabled:opacity-50"
+                          >
+                            {unlinking ? "Unlinking..." : "Yes, unlink"}
+                          </button>
+                          <button
+                            onClick={() => setShowUnlinkConfirm(false)}
+                            className="text-xs text-gray-600 px-2 py-1 rounded hover:bg-gray-100"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="text-xs text-blue-800">
@@ -130,17 +283,12 @@ export function UserSettingsModal({ profile, onClose }: Props) {
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Timezone
             </label>
-            <select
+            <TimezoneSearchSelect
               value={timezone}
-              onChange={(e) => setTimezone(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {getCommonTimezones().map((tz) => (
-                <option key={tz} value={tz}>
-                  {tz}
-                </option>
-              ))}
-            </select>
+              onChange={setTimezone}
+              search={timezoneSearch}
+              onSearchChange={setTimezoneSearch}
+            />
           </div>
 
           <div>

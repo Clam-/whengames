@@ -50,7 +50,7 @@ export function DisplayNamePrompt({ currentName, onSubmit }: Props) {
           onClick={handleLogin}
           className="text-sm text-blue-600 hover:text-blue-700 whitespace-nowrap"
         >
-          Login for DST notices &amp; more
+          Login to access saved availabilityies, changes across devices &amp; more
         </button>
       </form>
     </div>

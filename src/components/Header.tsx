@@ -9,7 +9,7 @@ import { UserSettingsModal } from "./UserSettingsModal";
 export function Header() {
   const { isAuthenticated, isLoading } = useConvexAuth();
   const { signIn, signOut } = useAuthActions();
-  const { anonymousId, hasInteracted } = useAnonymousUser();
+  const { anonymousId, hasInteracted, clearAnonymousUser } = useAnonymousUser();
   const location = useLocation();
   const [showSettings, setShowSettings] = useState(false);
 
@@ -91,6 +91,17 @@ export function Header() {
                     className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100"
                   >
                     Settings
+                  </button>
+                )}
+                {hasInteracted && profile && (
+                  <button
+                    onClick={() => {
+                      clearAnonymousUser();
+                      window.location.reload();
+                    }}
+                    className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100"
+                  >
+                    Logout
                   </button>
                 )}
               </>
