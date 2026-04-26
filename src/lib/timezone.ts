@@ -1,0 +1,209 @@
+import { DateTime, IANAZone } from "luxon";
+
+/**
+ * Get the user's timezone from browser.
+ * Uses Intl API which considers client hints.
+ */
+export function detectTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return "UTC";
+  }
+}
+
+/**
+ * Convert a weekday + time in one timezone to another timezone for a specific date.
+ * Used for recurring schedules where the selection is stored as wall-clock time.
+ *
+ * @param dayOfWeek 0-6 (0=Sunday in JS convention)
+ * @param time "HH:mm" format
+ * @param fromTimezone IANA timezone of the selection
+ * @param toTimezone IANA timezone of the viewer
+ * @param referenceDate A date in the week being viewed (to get correct DST offset)
+ * @returns { dayOfWeek, time, dateTime } in the target timezone
+ */
+export function convertRecurringSlot(
+  dayOfWeek: number,
+  time: string,
+  fromTimezone: string,
+  toTimezone: string,
+  referenceDate: DateTime
+): { dayOfWeek: number; time: string; dateTime: DateTime } {
+  // Find the date of the given dayOfWeek in the reference week
+  const refStart = referenceDate.startOf("week"); // Monday in Luxon
+  // Adjust: Luxon weeks start on Monday (1), JS weeks start on Sunday (0)
+  // Convert JS dayOfWeek to Luxon weekday: Sun=7, Mon=1, ..., Sat=6
+  const luxonWeekday = (dayOfWeek === 0 ? 7 : dayOfWeek) as 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  const targetDate = refStart.set({ weekday: luxonWeekday });
+
+  const [hours, minutes] = time.split(":").map(Number);
+
+  // Create datetime in the source timezone
+  const sourceDateTime = targetDate.set({
+    hour: hours,
+    minute: minutes,
+    second: 0,
+    millisecond: 0,
+  }).setZone(fromTimezone, { keepLocalTime: true });
+
+  // Convert to target timezone
+  const targetDateTime = sourceDateTime.setZone(toTimezone);
+
+  // Get the JS day of week (0=Sunday)
+  const resultDow = targetDateTime.weekday === 7 ? 0 : targetDateTime.weekday;
+  const resultTime = targetDateTime.toFormat("HH:mm");
+
+  return {
+    dayOfWeek: resultDow,
+    time: resultTime,
+    dateTime: targetDateTime,
+  };
+}
+
+/**
+ * Convert a one-off date + time selection between timezones.
+ * For one-off schedules, times are absolute (UTC-convertible).
+ */
+export function convertOneOffSlot(
+  dateStr: string,
+  time: string,
+  fromTimezone: string,
+  toTimezone: string
+): { date: string; time: string; dateTime: DateTime } {
+  const [hours, minutes] = time.split(":").map(Number);
+
+  const sourceDateTime = DateTime.fromISO(dateStr, {
+    zone: fromTimezone,
+  }).set({
+    hour: hours,
+    minute: minutes,
+    second: 0,
+    millisecond: 0,
+  });
+
+  const targetDateTime = sourceDateTime.setZone(toTimezone);
+
+  return {
+    date: targetDateTime.toISODate()!,
+    time: targetDateTime.toFormat("HH:mm"),
+    dateTime: targetDateTime,
+  };
+}
+
+/**
+ * Generate time slot labels for the grid (48 half-hour slots).
+ */
+export function generateTimeSlots(): string[] {
+  const slots: string[] = [];
+  for (let h = 0; h < 24; h++) {
+    for (let m = 0; m < 60; m += 30) {
+      slots.push(
+        `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
+      );
+    }
+  }
+  return slots;
+}
+
+/**
+ * Format a time slot for display (e.g., "14:00" -> "2:00 PM").
+ */
+export function formatTimeSlot(slot: string): string {
+  const [h, m] = slot.split(":").map(Number);
+  const period = h >= 12 ? "PM" : "AM";
+  const displayHour = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${displayHour}:${m.toString().padStart(2, "0")} ${period}`;
+}
+
+/**
+ * Get day names starting from the configured start day.
+ */
+export function getDayNames(startDay: number = 0): string[] {
+  const allDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const result: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    result.push(allDays[(startDay + i) % 7]);
+  }
+  return result;
+}
+
+/**
+ * Get full day names starting from the configured start day.
+ */
+export function getFullDayNames(startDay: number = 0): string[] {
+  const allDays = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ];
+  const result: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    result.push(allDays[(startDay + i) % 7]);
+  }
+  return result;
+}
+
+/**
+ * Get the dates for a week starting from a reference date and start day.
+ */
+export function getWeekDates(
+  referenceDate: DateTime,
+  startDay: number = 0
+): DateTime[] {
+  // Find the most recent startDay on or before referenceDate
+  const refDow = referenceDate.weekday === 7 ? 0 : referenceDate.weekday; // Convert to JS convention
+  let daysBack = (refDow - startDay + 7) % 7;
+  const weekStart = referenceDate.minus({ days: daysBack });
+
+  const dates: DateTime[] = [];
+  for (let i = 0; i < 7; i++) {
+    dates.push(weekStart.plus({ days: i }));
+  }
+  return dates;
+}
+
+/**
+ * Check if a given IANA timezone is valid.
+ */
+export function isValidTimezone(tz: string): boolean {
+  return IANAZone.isValidZone(tz);
+}
+
+/**
+ * Get a list of common timezones for the settings dropdown.
+ */
+export function getCommonTimezones(): string[] {
+  return [
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+    "America/Anchorage",
+    "Pacific/Honolulu",
+    "America/Toronto",
+    "America/Vancouver",
+    "America/Sao_Paulo",
+    "America/Argentina/Buenos_Aires",
+    "Europe/London",
+    "Europe/Paris",
+    "Europe/Berlin",
+    "Europe/Moscow",
+    "Europe/Istanbul",
+    "Asia/Dubai",
+    "Asia/Kolkata",
+    "Asia/Bangkok",
+    "Asia/Shanghai",
+    "Asia/Tokyo",
+    "Asia/Seoul",
+    "Australia/Sydney",
+    "Australia/Melbourne",
+    "Australia/Perth",
+    "Pacific/Auckland",
+    "UTC",
+  ];
+}

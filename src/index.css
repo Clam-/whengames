@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+/* Custom theme overrides for Tailwind v4 */
+@theme {
+  --color-can-do: #22c55e;
+  --color-can-do-bg: #dcfce7;
+  --color-cant-do: #ef4444;
+  --color-cant-do-bg: #fee2e2;
+  --color-maybe: #eab308;
+  --color-maybe-bg: #fef9c3;
+  --color-nominated: #3b82f6;
+  --color-nominated-bg: #dbeafe;
+  --color-locked: #8b5cf6;
+  --color-locked-bg: #ede9fe;
+}
+
+/* Compact grid styles */
+.grid-cell {
+  @apply border border-gray-200 relative select-none;
+  min-height: 24px;
+  min-width: 80px;
+}
+
+.grid-cell:hover {
+  @apply border-gray-400;
+}
+
+.grid-cell.state-can-do {
+  @apply bg-can-do-bg;
+}
+.grid-cell.state-cant-do {
+  @apply bg-cant-do-bg;
+}
+.grid-cell.state-maybe {
+  @apply bg-maybe-bg;
+}
+
+.grid-cell.nominated {
+  @apply ring-2 ring-nominated ring-inset;
+}
+.grid-cell.locked {
+  @apply ring-2 ring-locked ring-inset;
+}
+
+/* Selection box during drag */
+.selection-box {
+  @apply fixed border-2 border-blue-500 bg-blue-500/10 pointer-events-none z-50;
+}
+
+/* Drag selection visual feedback for creator modes (uses box-shadow to avoid ring conflicts) */
+.grid-cell.drag-select-nominate {
+  box-shadow: inset 0 0 0 2px var(--color-nominated);
+}
+.grid-cell.drag-select-lock {
+  box-shadow: inset 0 0 0 2px var(--color-locked);
+}
+
+/* Current time indicator */
+.current-time-line {
+  @apply absolute left-0 right-0 border-t-2 border-red-500 z-20 pointer-events-none;
+}
+
+/* Current day column highlight */
+.current-day-col {
+  @apply ring-2 ring-blue-400 ring-inset;
+}
+
+/* Scrollbar styling for the grid */
+.grid-container::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.grid-container::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded;
+}
+
+/* No-interaction cursor for anonymous users without display name */
+.no-interact {
+  @apply opacity-50;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Profile icon groups in cells */
+.profile-group {
+  @apply inline-flex flex-wrap gap-px p-px rounded;
+}
+.profile-group.can-do {
+  @apply bg-can-do/30;
+}
+.profile-group.cant-do {
+  @apply bg-cant-do/30;
+}
+.profile-group.maybe {
+  @apply bg-maybe/30;
+}
+
+.profile-icon {
+  @apply w-4 h-4 rounded-full text-[8px] flex items-center justify-center font-bold text-white;
+}

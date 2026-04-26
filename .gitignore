@@ -1,9 +1,18 @@
-.next
+# Dependencies
 node_modules
-.env.local
-.env
-.convex
-coverage
-npm-debug.log*
+
+# Build output
+dist
 *.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+*.local
+
+# AI agent skills (regenerate with: npx convex ai-files install)
+.agents/
+.claude/skills/
+
+# macOS
 .DS_Store
