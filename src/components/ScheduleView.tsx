@@ -6,6 +6,7 @@ import { Id } from "../../convex/_generated/dataModel";
 import { Header } from "./Header";
 import { WeeklyGrid } from "./WeeklyGrid";
 import { DisplayNamePrompt } from "./DisplayNamePrompt";
+import { ClearConfirmModal } from "./ClearConfirmModal";
 import { useAnonymousUser } from "../hooks/useAnonymousUser";
 import { useTimezone } from "../hooks/useTimezone";
 import { detectTimezone, getWeekDates } from "../lib/timezone";
@@ -37,12 +38,16 @@ export function ScheduleView() {
   const batchSetMut = useMutation(api.selections.batchSet);
   const setDisallowedSlots = useMutation(api.schedules.setDisallowedSlots);
   const setLockedSlots = useMutation(api.schedules.setLockedSlots);
+  const clearDisallowedSlots = useMutation(api.schedules.clearDisallowedSlots);
+  const clearLockedSlots = useMutation(api.schedules.clearLockedSlots);
+  const clearSelections = useMutation(api.selections.clearForProfile);
 
   const [selectMode, setSelectMode] = useState<SelectMode>("auto");
   const [allowMode, setAllowMode] = useState<AllowMode>("auto");
   const [creatorMode, setCreatorMode] = useState<CreatorMode>(null);
   const [weekOffset, setWeekOffset] = useState(0);
   const [hasName, setHasName] = useState(false);
+  const [showClearModal, setShowClearModal] = useState(false);
 
   // Check if current user is the creator
   const isCreator = profile && schedule
@@ -168,6 +173,78 @@ export function ScheduleView() {
     },
     [isCreator, schedule, creatorMode, setDisallowedSlots, setLockedSlots]
   );
+
+  // Clear modal content based on role and creator mode
+  const getClearModalContent = () => {
+    if (!isCreator) {
+      return {
+        title: "Clear Nominations",
+        message:
+          "Are you sure you want to clear all your nominations for this schedule? This cannot be undone.",
+      };
+    }
+    switch (creatorMode) {
+      case "limit":
+        return {
+          title: "Clear Allow/Disallow Settings",
+          message:
+            "Are you sure you want to clear all allow/disallow time settings? All time slots will become allowed again.",
+        };
+      case "nominate":
+        return {
+          title: "Clear Nominations",
+          message:
+            "Are you sure you want to clear all your nominations for this schedule? This cannot be undone.",
+        };
+      case "lock":
+        return {
+          title: "Clear Locked Times",
+          message:
+            "Are you sure you want to clear all locked-in times? The schedule will be unlocked.",
+        };
+      default:
+        return {
+          title: "Clear",
+          message: "Are you sure you want to clear?",
+        };
+    }
+  };
+
+  const handleClear = useCallback(async () => {
+    if (!profile || !schedule) return;
+
+    if (!isCreator) {
+      // Non-creator: clear their own nominations
+      await clearSelections({
+        scheduleId: schedule._id,
+        profileId: profile._id,
+      });
+    } else {
+      // Creator: clear based on current mode
+      switch (creatorMode) {
+        case "limit":
+          await clearDisallowedSlots({ scheduleId: schedule._id });
+          break;
+        case "nominate":
+          await clearSelections({
+            scheduleId: schedule._id,
+            profileId: profile._id,
+          });
+          break;
+        case "lock":
+          await clearLockedSlots({ scheduleId: schedule._id });
+          break;
+      }
+    }
+  }, [
+    profile,
+    schedule,
+    isCreator,
+    creatorMode,
+    clearSelections,
+    clearDisallowedSlots,
+    clearLockedSlots,
+  ]);
 
   if (!schedule) {
     return (
@@ -356,6 +433,16 @@ export function ScheduleView() {
             </div>
           )}
 
+          {/* Clear button */}
+          {canInteract && (
+            <button
+              onClick={() => setShowClearModal(true)}
+              className="text-xs px-2 py-1 rounded text-red-600 hover:bg-red-50 border border-red-200 hover:border-red-300 transition-colors"
+            >
+              Clear
+            </button>
+          )}
+
           {/* Week navigation */}
           <div className="flex items-center gap-2 ml-auto">
             <button
@@ -408,6 +495,19 @@ export function ScheduleView() {
           onCreatorSlotChange={handleCreatorSlotChange}
         />
       </main>
+
+      {/* Clear confirmation modal */}
+      {showClearModal && (() => {
+        const { title, message } = getClearModalContent();
+        return (
+          <ClearConfirmModal
+            title={title}
+            message={message}
+            onConfirm={handleClear}
+            onClose={() => setShowClearModal(false)}
+          />
+        );
+      })()}
     </div>
   );
 }

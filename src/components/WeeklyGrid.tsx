@@ -572,11 +572,14 @@ export function WeeklyGrid({
             }
             onCreatorSlotChange(currentSlots);
           } else if (isCreator && creatorMode === "lock") {
-            // Lock mode: update lockedSlots
+            // Lock mode: filter out disallowed cells first
+            const allowedCells = selectedCells.filter(
+              (cell) => !isCellDisallowed(cell.dayIndex, cell.timeIndex)
+            );
             const action = dragActionRef.current; // "lock" or "unlock"
             const currentSlots = [...(schedule.lockedSlots || [])];
 
-            for (const cell of selectedCells) {
+            for (const cell of allowedCells) {
               const { dayKey, timeSlot } = toStorageKeys(
                 cell.dayIndex,
                 cell.timeIndex
@@ -595,14 +598,19 @@ export function WeeklyGrid({
             }
             onCreatorSlotChange(currentSlots);
           } else {
-            // Regular / nominate mode: apply cell state
+            // Regular / nominate mode: filter out disallowed cells first
+            const allowedCells = selectedCells.filter(
+              (cell) => !isCellDisallowed(cell.dayIndex, cell.timeIndex)
+            );
             const state = dragActionRef.current as CellState;
-            const batchSelections = selectedCells.map((cell) => {
+            const batchSelections = allowedCells.map((cell) => {
               const { dayKey, timeSlot, isException, exceptionDate } =
                 toStorageKeys(cell.dayIndex, cell.timeIndex);
               return { dayKey, timeSlot, state, isException, exceptionDate };
             });
-            onBatchChange(batchSelections);
+            if (batchSelections.length > 0) {
+              onBatchChange(batchSelections);
+            }
           }
         }
       }
@@ -652,6 +660,7 @@ export function WeeklyGrid({
     isCreator,
     creatorMode,
     onCreatorSlotChange,
+    isCellDisallowed,
     disallowedSet,
     lockedSet,
     schedule.disallowedSlots,

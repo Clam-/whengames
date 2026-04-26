@@ -117,6 +117,7 @@ export const update = mutation({
 });
 
 // Set disallowed time slots (creator allow/disallow mode)
+// Also strips any locked slots that overlap with the newly disallowed set.
 export const setDisallowedSlots = mutation({
   args: {
     scheduleId: v.id("schedules"),
@@ -128,13 +129,29 @@ export const setDisallowedSlots = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (!schedule) return;
+
+    // Build a set of the new disallowed keys for fast lookup
+    const disallowedKeys = new Set(
+      args.slots.map((s) => `${s.dayKey}|${s.timeSlot}`)
+    );
+
+    // Remove any locked slots that are now disallowed
+    const currentLocked = schedule.lockedSlots || [];
+    const filteredLocked = currentLocked.filter(
+      (s) => !disallowedKeys.has(`${s.dayKey}|${s.timeSlot}`)
+    );
+
     await ctx.db.patch(args.scheduleId, {
       disallowedSlots: args.slots,
+      lockedSlots: filteredLocked,
     });
   },
 });
 
 // Lock in time slots (creator only)
+// Filters out any slots that are currently disallowed.
 export const setLockedSlots = mutation({
   args: {
     scheduleId: v.id("schedules"),
@@ -146,9 +163,53 @@ export const setLockedSlots = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (!schedule) return;
+
+    // Strip any disallowed slots from the lock request
+    const disallowedKeys = new Set(
+      (schedule.disallowedSlots || []).map(
+        (s) => `${s.dayKey}|${s.timeSlot}`
+      )
+    );
+    const filteredSlots = args.slots.filter(
+      (s) => !disallowedKeys.has(`${s.dayKey}|${s.timeSlot}`)
+    );
+
     await ctx.db.patch(args.scheduleId, {
-      lockedSlots: args.slots,
+      lockedSlots: filteredSlots,
       isLocked: true,
+    });
+  },
+});
+
+// Clear disallowed time slots (creator allow/disallow mode)
+export const clearDisallowedSlots = mutation({
+  args: {
+    scheduleId: v.id("schedules"),
+  },
+  handler: async (ctx, args) => {
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (!schedule) return;
+
+    await ctx.db.patch(args.scheduleId, {
+      disallowedSlots: [],
+    });
+  },
+});
+
+// Clear locked time slots (creator lock mode)
+export const clearLockedSlots = mutation({
+  args: {
+    scheduleId: v.id("schedules"),
+  },
+  handler: async (ctx, args) => {
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (!schedule) return;
+
+    await ctx.db.patch(args.scheduleId, {
+      lockedSlots: [],
+      isLocked: false,
     });
   },
 });

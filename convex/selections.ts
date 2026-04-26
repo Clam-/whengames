@@ -1,6 +1,18 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 
+// Helper: check if a slot is in the schedule's disallowed list
+function isSlotDisallowed(
+  disallowedSlots: { dayKey: string; timeSlot: string }[] | undefined,
+  dayKey: string,
+  timeSlot: string
+): boolean {
+  if (!disallowedSlots) return false;
+  return disallowedSlots.some(
+    (s) => s.dayKey === dayKey && s.timeSlot === timeSlot
+  );
+}
+
 // Set a single cell selection
 export const set = mutation({
   args: {
@@ -18,6 +30,16 @@ export const set = mutation({
     exceptionDate: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Guard: reject nominations on disallowed cells
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (
+      schedule &&
+      isSlotDisallowed(schedule.disallowedSlots, args.dayKey, args.timeSlot)
+    ) {
+      // Silently skip — pre-existing selections are kept, but new ones are blocked
+      return null;
+    }
+
     // Find existing selection(s) for this cell
     const existing = await ctx.db
       .query("selections")
@@ -75,6 +97,15 @@ export const remove = mutation({
     exceptionDate: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Guard: reject changes on disallowed cells
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (
+      schedule &&
+      isSlotDisallowed(schedule.disallowedSlots, args.dayKey, args.timeSlot)
+    ) {
+      return;
+    }
+
     const existing = await ctx.db
       .query("selections")
       .withIndex("by_schedule_profile", (q) =>
@@ -123,7 +154,16 @@ export const batchSet = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    // Load schedule once to check disallowed slots
+    const schedule = await ctx.db.get(args.scheduleId);
+    const disallowed = schedule?.disallowedSlots;
+
     for (const sel of args.selections) {
+      // Guard: skip disallowed cells
+      if (isSlotDisallowed(disallowed, sel.dayKey, sel.timeSlot)) {
+        continue;
+      }
+
       // Find existing selection(s) for this cell
       const existing = await ctx.db
         .query("selections")
@@ -172,6 +212,34 @@ export const batchSet = mutation({
         });
       }
     }
+  },
+});
+
+// Clear all selections for a profile on a schedule
+export const clearForProfile = mutation({
+  args: {
+    scheduleId: v.id("schedules"),
+    profileId: v.id("userProfiles"),
+  },
+  handler: async (ctx, args) => {
+    // Fetch in batches and delete
+    let deleted = 0;
+    while (true) {
+      const batch = await ctx.db
+        .query("selections")
+        .withIndex("by_schedule_profile", (q) =>
+          q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
+        )
+        .take(100);
+
+      if (batch.length === 0) break;
+
+      for (const record of batch) {
+        await ctx.db.delete(record._id);
+        deleted++;
+      }
+    }
+    return deleted;
   },
 });
 
