@@ -60,9 +60,20 @@
   @apply absolute left-0 right-0 border-t-2 border-red-500 z-20 pointer-events-none;
 }
 
-/* Current day column highlight */
-.current-day-col {
-  @apply ring-2 ring-blue-400 ring-inset;
+/* Current day column highlight — faint outline around the whole column, not each cell */
+.current-day-header {
+  border-left: 2px solid #93c5fd;
+  border-right: 2px solid #93c5fd;
+  border-top: 2px solid #93c5fd;
+}
+
+.grid-cell.current-day-col {
+  border-left: 2px solid #93c5fd;
+  border-right: 2px solid #93c5fd;
+}
+
+.grid-cell.current-day-col-last {
+  border-bottom: 2px solid #93c5fd;
 }
 
 /* Scrollbar styling for the grid */

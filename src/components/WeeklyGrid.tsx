@@ -710,7 +710,7 @@ export function WeeklyGrid({
                     key={i}
                     className={`border border-gray-200 px-1 py-1 text-xs font-medium min-w-[80px] ${
                       isToday
-                        ? "bg-blue-50 text-blue-700 ring-2 ring-blue-400 ring-inset"
+                        ? "bg-blue-50 text-blue-700 current-day-header"
                         : "bg-gray-50 text-gray-600"
                     } ${!inRange ? "opacity-40" : ""}`}
                   >
@@ -769,7 +769,7 @@ export function WeeklyGrid({
                         myState !== "blank" ? `state-${myState}` : ""
                       } ${isNominated ? "nominated" : ""} ${
                         isLocked ? "locked" : ""
-                      } ${isToday ? "current-day-col" : ""} ${
+                      } ${isToday ? `current-day-col${timeIndex === TIME_SLOTS.length - 1 ? " current-day-col-last" : ""}` : ""} ${
                         dragSelectionClass
                       } ${!inRange ? "opacity-30 pointer-events-none" : ""}`}
                       onMouseDown={(e) =>
