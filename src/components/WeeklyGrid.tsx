@@ -13,7 +13,8 @@ import { getDstNotice } from "../lib/dst";
 
 type CellState = "can-do" | "cant-do" | "maybe" | "blank";
 type SelectMode = "auto" | "can-do" | "cant-do" | "maybe";
-type CreatorMode = "nominate" | "lock" | null;
+type AllowMode = "auto" | "allow" | "dont-allow";
+type CreatorMode = "limit" | "nominate" | "lock" | null;
 
 interface Selection {
   _id: string;
@@ -44,7 +45,7 @@ interface Schedule {
   creatorProfileId: Id<"userProfiles">;
   selections: Selection[];
   profiles: Profile[];
-  nominatedSlots?: { dayKey: string; timeSlot: string }[];
+  disallowedSlots?: { dayKey: string; timeSlot: string }[];
   lockedSlots?: { dayKey: string; timeSlot: string }[];
   isLocked?: boolean;
 }
@@ -55,6 +56,7 @@ interface Props {
   userTimezone: string;
   weekStartDay: number;
   selectMode: SelectMode;
+  allowMode: AllowMode;
   weekOffset: number;
   canInteract: boolean;
   isCreator: boolean;
@@ -75,7 +77,7 @@ interface Props {
       exceptionDate?: string;
     }[]
   ) => Promise<void>;
-  onNominateOrLock: (
+  onCreatorSlotChange: (
     slots: { dayKey: string; timeSlot: string }[]
   ) => Promise<void>;
 }
@@ -108,13 +110,14 @@ export function WeeklyGrid({
   userTimezone,
   weekStartDay,
   selectMode,
+  allowMode,
   weekOffset,
   canInteract,
   isCreator,
   creatorMode,
   onCellChange,
   onBatchChange,
-  onNominateOrLock,
+  onCreatorSlotChange,
 }: Props) {
   const gridRef = useRef<HTMLDivElement>(null);
   const cellRefs = useRef<Map<string, HTMLTableCellElement>>(new Map());
@@ -134,7 +137,10 @@ export function WeeklyGrid({
     dayIndex: number;
     timeIndex: number;
   } | null>(null);
-  const dragStateRef = useRef<CellState>("can-do");
+  // For regular/nominate mode: stores the CellState to apply
+  // For limit mode: stores "allow" or "dont-allow"
+  // For lock mode: stores "lock" or "unlock"
+  const dragActionRef = useRef<string>("can-do");
 
   // Current time for the indicator
   const [now, setNow] = useState(DateTime.now().setZone(userTimezone));
@@ -142,7 +148,7 @@ export function WeeklyGrid({
   useEffect(() => {
     const interval = setInterval(() => {
       setNow(DateTime.now().setZone(userTimezone));
-    }, 30000); // Update every 30 seconds
+    }, 30000);
     return () => clearInterval(interval);
   }, [userTimezone]);
 
@@ -168,7 +174,6 @@ export function WeeklyGrid({
       if (sel.profileId !== profileId) continue;
 
       if (schedule.type === "one-off") {
-        // Convert from selector's timezone to viewer's timezone
         const converted = convertOneOffSlot(
           sel.dayKey,
           sel.timeSlot,
@@ -177,9 +182,7 @@ export function WeeklyGrid({
         );
         map.set(`${converted.date}|${converted.time}`, sel.state);
       } else {
-        // Recurring
         if (sel.isException && sel.exceptionDate) {
-          // Exception: treat like a one-off on a specific date
           const converted = convertOneOffSlot(
             sel.exceptionDate,
             sel.timeSlot,
@@ -188,7 +191,6 @@ export function WeeklyGrid({
           );
           map.set(`exc:${converted.date}|${converted.time}`, sel.state);
         } else {
-          // Regular recurring
           const dow = parseInt(sel.dayKey);
           const converted = convertRecurringSlot(
             dow,
@@ -252,16 +254,17 @@ export function WeeklyGrid({
     return map;
   }, [schedule.selections, userTimezone, schedule.type, referenceDate]);
 
-  // Nominated/locked slots mapped to viewer timezone
-  const nominatedSet = useMemo(() => {
+  // Disallowed slots set
+  const disallowedSet = useMemo(() => {
     const set = new Set<string>();
-    if (!schedule.nominatedSlots) return set;
-    for (const slot of schedule.nominatedSlots) {
+    if (!schedule.disallowedSlots) return set;
+    for (const slot of schedule.disallowedSlots) {
       set.add(`${slot.dayKey}|${slot.timeSlot}`);
     }
     return set;
-  }, [schedule.nominatedSlots]);
+  }, [schedule.disallowedSlots]);
 
+  // Locked slots set
   const lockedSet = useMemo(() => {
     const set = new Set<string>();
     if (!schedule.lockedSlots) return set;
@@ -278,11 +281,8 @@ export function WeeklyGrid({
         const date = weekDates[dayIndex];
         return `${date.toISODate()}|${TIME_SLOTS[timeIndex]}`;
       } else {
-        // For recurring schedule while viewing a specific week,
-        // we need to check for exceptions
         const date = weekDates[dayIndex];
         const dow = (weekStartDay + dayIndex) % 7;
-        // Check if there's an exception for this specific date
         const excKey = `exc:${date.toISODate()}|${TIME_SLOTS[timeIndex]}`;
         if (myCellStates.has(excKey)) {
           return excKey;
@@ -333,13 +333,11 @@ export function WeeklyGrid({
         const date = weekDates[dayIndex];
         return { dayKey: date.toISODate()!, timeSlot };
       } else {
-        // Recurring: check if we're in a non-current week (exception)
         const date = weekDates[dayIndex];
         const dow = (weekStartDay + dayIndex) % 7;
         const isCurrentWeek = weekOffset === 0;
 
         if (!isCurrentWeek) {
-          // This is an exception for a specific date
           return {
             dayKey: String(dow),
             timeSlot,
@@ -354,36 +352,79 @@ export function WeeklyGrid({
     [schedule.type, weekDates, weekStartDay, weekOffset]
   );
 
+  // Check if a cell is disallowed
+  const isCellDisallowed = useCallback(
+    (dayIndex: number, timeIndex: number): boolean => {
+      const { dayKey, timeSlot } = toStorageKeys(dayIndex, timeIndex);
+      return disallowedSet.has(`${dayKey}|${timeSlot}`);
+    },
+    [toStorageKeys, disallowedSet]
+  );
+
+  // Check if a cell is locked
+  const isCellLocked = useCallback(
+    (dayIndex: number, timeIndex: number): boolean => {
+      const { dayKey, timeSlot } = toStorageKeys(dayIndex, timeIndex);
+      return lockedSet.has(`${dayKey}|${timeSlot}`);
+    },
+    [toStorageKeys, lockedSet]
+  );
+
   // Handle single cell click (toggle)
   const handleSingleCellToggle = useCallback(
     (dayIndex: number, timeIndex: number) => {
       if (!canInteract) return;
 
-      if (isCreator && (creatorMode === "nominate" || creatorMode === "lock")) {
-        // Creator nominate/lock mode
-        const { dayKey, timeSlot } = toStorageKeys(dayIndex, timeIndex);
-        const slotKey = `${dayKey}|${timeSlot}`;
-        const targetSet =
-          creatorMode === "nominate" ? nominatedSet : lockedSet;
-        const currentSlots =
-          creatorMode === "nominate"
-            ? schedule.nominatedSlots || []
-            : schedule.lockedSlots || [];
+      const { dayKey, timeSlot } = toStorageKeys(dayIndex, timeIndex);
+      const slotKey = `${dayKey}|${timeSlot}`;
 
-        if (targetSet.has(slotKey)) {
-          // Remove
-          onNominateOrLock(
+      // Creator: Allow/Disallow mode
+      if (isCreator && creatorMode === "limit") {
+        const currentSlots = schedule.disallowedSlots || [];
+        const cellIsDisallowed = disallowedSet.has(slotKey);
+
+        if (allowMode === "auto") {
+          // Toggle
+          if (cellIsDisallowed) {
+            onCreatorSlotChange(
+              currentSlots.filter(
+                (s) => !(s.dayKey === dayKey && s.timeSlot === timeSlot)
+              )
+            );
+          } else {
+            onCreatorSlotChange([...currentSlots, { dayKey, timeSlot }]);
+          }
+        } else if (allowMode === "allow" && cellIsDisallowed) {
+          onCreatorSlotChange(
+            currentSlots.filter(
+              (s) => !(s.dayKey === dayKey && s.timeSlot === timeSlot)
+            )
+          );
+        } else if (allowMode === "dont-allow" && !cellIsDisallowed) {
+          onCreatorSlotChange([...currentSlots, { dayKey, timeSlot }]);
+        }
+        return;
+      }
+
+      // Creator: Lock mode
+      if (isCreator && creatorMode === "lock") {
+        const currentSlots = schedule.lockedSlots || [];
+        const cellIsLocked = lockedSet.has(slotKey);
+
+        // Toggle lock state
+        if (cellIsLocked) {
+          onCreatorSlotChange(
             currentSlots.filter(
               (s) => !(s.dayKey === dayKey && s.timeSlot === timeSlot)
             )
           );
         } else {
-          // Add
-          onNominateOrLock([...currentSlots, { dayKey, timeSlot }]);
+          onCreatorSlotChange([...currentSlots, { dayKey, timeSlot }]);
         }
         return;
       }
 
+      // Regular mode or creator nominate mode — standard selection behavior
       const currentState = getCellState(dayIndex, timeIndex);
       let newState: CellState;
 
@@ -393,10 +434,7 @@ export function WeeklyGrid({
         newState = currentState === selectMode ? "blank" : selectMode;
       }
 
-      const { dayKey, timeSlot, isException, exceptionDate } = toStorageKeys(
-        dayIndex,
-        timeIndex
-      );
+      const { isException, exceptionDate } = toStorageKeys(dayIndex, timeIndex);
       onCellChange(dayKey, timeSlot, newState, isException, exceptionDate);
     },
     [
@@ -404,13 +442,14 @@ export function WeeklyGrid({
       isCreator,
       creatorMode,
       selectMode,
+      allowMode,
       getCellState,
       toStorageKeys,
       onCellChange,
-      onNominateOrLock,
-      nominatedSet,
+      onCreatorSlotChange,
+      disallowedSet,
       lockedSet,
-      schedule.nominatedSlots,
+      schedule.disallowedSlots,
       schedule.lockedSlots,
     ]
   );
@@ -431,13 +470,26 @@ export function WeeklyGrid({
       setIsDragging(true);
       setDragActive(false);
 
-      // Determine drag state
-      const currentState = getCellState(dayIndex, timeIndex);
-      if (selectMode === "auto") {
-        dragStateRef.current =
-          currentState === "blank" ? "can-do" : currentState;
+      // Determine drag action based on mode
+      if (isCreator && creatorMode === "limit") {
+        const cellIsDisallowed = isCellDisallowed(dayIndex, timeIndex);
+        if (allowMode === "auto") {
+          dragActionRef.current = cellIsDisallowed ? "allow" : "dont-allow";
+        } else {
+          dragActionRef.current = allowMode;
+        }
+      } else if (isCreator && creatorMode === "lock") {
+        const cellIsLocked = isCellLocked(dayIndex, timeIndex);
+        dragActionRef.current = cellIsLocked ? "unlock" : "lock";
       } else {
-        dragStateRef.current = selectMode;
+        // Regular / nominate mode
+        const currentState = getCellState(dayIndex, timeIndex);
+        if (selectMode === "auto") {
+          dragActionRef.current =
+            currentState === "blank" ? "can-do" : currentState;
+        } else {
+          dragActionRef.current = selectMode;
+        }
       }
 
       setSelectionBox({
@@ -447,7 +499,16 @@ export function WeeklyGrid({
         currentY: e.clientY,
       });
     },
-    [canInteract, getCellState, selectMode]
+    [
+      canInteract,
+      getCellState,
+      selectMode,
+      isCreator,
+      creatorMode,
+      allowMode,
+      isCellDisallowed,
+      isCellLocked,
+    ]
   );
 
   useEffect(() => {
@@ -484,33 +545,58 @@ export function WeeklyGrid({
           dragStartRef.current.timeIndex
         );
       } else if (dragActive) {
-        // Drag complete - collect selected cells
+        // Drag complete — collect selected cells
         const selectedCells = getSelectedCells();
         if (selectedCells.length > 0) {
-          if (isCreator && (creatorMode === "nominate" || creatorMode === "lock")) {
-            // Creator mode: merge new cells with existing nominated/locked slots
-            const currentSlots =
-              creatorMode === "nominate"
-                ? schedule.nominatedSlots || []
-                : schedule.lockedSlots || [];
-            const targetSet =
-              creatorMode === "nominate" ? nominatedSet : lockedSet;
+          if (isCreator && creatorMode === "limit") {
+            // Allow/Disallow mode: update disallowedSlots
+            const action = dragActionRef.current; // "allow" or "dont-allow"
+            const currentSlots = [...(schedule.disallowedSlots || [])];
 
-            const mergedSlots = [...currentSlots];
             for (const cell of selectedCells) {
               const { dayKey, timeSlot } = toStorageKeys(
                 cell.dayIndex,
                 cell.timeIndex
               );
               const slotKey = `${dayKey}|${timeSlot}`;
-              if (!targetSet.has(slotKey)) {
-                mergedSlots.push({ dayKey, timeSlot });
+              const isInSet = disallowedSet.has(slotKey);
+
+              if (action === "dont-allow" && !isInSet) {
+                currentSlots.push({ dayKey, timeSlot });
+              } else if (action === "allow" && isInSet) {
+                const idx = currentSlots.findIndex(
+                  (s) => s.dayKey === dayKey && s.timeSlot === timeSlot
+                );
+                if (idx !== -1) currentSlots.splice(idx, 1);
               }
             }
-            onNominateOrLock(mergedSlots);
+            onCreatorSlotChange(currentSlots);
+          } else if (isCreator && creatorMode === "lock") {
+            // Lock mode: update lockedSlots
+            const action = dragActionRef.current; // "lock" or "unlock"
+            const currentSlots = [...(schedule.lockedSlots || [])];
+
+            for (const cell of selectedCells) {
+              const { dayKey, timeSlot } = toStorageKeys(
+                cell.dayIndex,
+                cell.timeIndex
+              );
+              const slotKey = `${dayKey}|${timeSlot}`;
+              const isInSet = lockedSet.has(slotKey);
+
+              if (action === "lock" && !isInSet) {
+                currentSlots.push({ dayKey, timeSlot });
+              } else if (action === "unlock" && isInSet) {
+                const idx = currentSlots.findIndex(
+                  (s) => s.dayKey === dayKey && s.timeSlot === timeSlot
+                );
+                if (idx !== -1) currentSlots.splice(idx, 1);
+              }
+            }
+            onCreatorSlotChange(currentSlots);
           } else {
-            // Regular mode: apply state to cells
-            const state = dragStateRef.current;
+            // Regular / nominate mode: apply cell state
+            const state = dragActionRef.current as CellState;
             const batchSelections = selectedCells.map((cell) => {
               const { dayKey, timeSlot, isException, exceptionDate } =
                 toStorageKeys(cell.dayIndex, cell.timeIndex);
@@ -557,7 +643,20 @@ export function WeeklyGrid({
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("contextmenu", handleContextMenu);
     };
-  }, [isDragging, dragActive, handleSingleCellToggle, toStorageKeys, onBatchChange, isCreator, creatorMode, onNominateOrLock, nominatedSet, lockedSet, schedule.nominatedSlots, schedule.lockedSlots]);
+  }, [
+    isDragging,
+    dragActive,
+    handleSingleCellToggle,
+    toStorageKeys,
+    onBatchChange,
+    isCreator,
+    creatorMode,
+    onCreatorSlotChange,
+    disallowedSet,
+    lockedSet,
+    schedule.disallowedSlots,
+    schedule.lockedSlots,
+  ]);
 
   // Get cells that overlap with the selection box
   const getSelectedCells = useCallback((): {
@@ -625,11 +724,11 @@ export function WeeklyGrid({
   const getDragSelectionClass = useCallback(
     (dayIndex: number, timeIndex: number): string => {
       if (!isCellInDragSelection(dayIndex, timeIndex)) return "";
-      if (!isCreator || !creatorMode) return "bg-blue-100";
 
-      if (creatorMode === "nominate") return "drag-select-nominate";
-      if (creatorMode === "lock") return "drag-select-lock";
-      return "";
+      if (isCreator && creatorMode === "limit") return "drag-select-limit";
+      if (isCreator && creatorMode === "lock") return "drag-select-lock";
+      // nominate mode or non-creator
+      return "bg-blue-100";
     },
     [isCellInDragSelection, isCreator, creatorMode]
   );
@@ -663,7 +762,9 @@ export function WeeklyGrid({
     (dateStr: string): boolean => {
       if (schedule.type !== "one-off") return true;
       if (!schedule.dateRangeStart || !schedule.dateRangeEnd) return true;
-      return dateStr >= schedule.dateRangeStart && dateStr <= schedule.dateRangeEnd;
+      return (
+        dateStr >= schedule.dateRangeStart && dateStr <= schedule.dateRangeEnd
+      );
     },
     [schedule.type, schedule.dateRangeStart, schedule.dateRangeEnd]
   );
@@ -678,6 +779,13 @@ export function WeeklyGrid({
       height: Math.abs(selectionBox.currentY - selectionBox.startY),
     };
   }, [selectionBox, dragActive]);
+
+  // Determine the CSS class for the selection box overlay
+  const selectionBoxClass = useMemo(() => {
+    if (isCreator && creatorMode === "limit") return "selection-box limit";
+    if (isCreator && creatorMode === "lock") return "selection-box lock";
+    return "selection-box";
+  }, [isCreator, creatorMode]);
 
   return (
     <div className="relative">
@@ -735,12 +843,8 @@ export function WeeklyGrid({
                   const myState = getCellState(dayIndex, timeIndex);
                   const cellKey = getCellKey(dayIndex, timeIndex);
                   const otherSelections = allCellSelections.get(cellKey) || [];
-                  const isNominated = nominatedSet.has(
-                    `${toStorageKeys(dayIndex, timeIndex).dayKey}|${TIME_SLOTS[timeIndex]}`
-                  );
-                  const isLocked = lockedSet.has(
-                    `${toStorageKeys(dayIndex, timeIndex).dayKey}|${TIME_SLOTS[timeIndex]}`
-                  );
+                  const cellDisallowed = isCellDisallowed(dayIndex, timeIndex);
+                  const cellLocked = isCellLocked(dayIndex, timeIndex);
                   const isToday = dayIndex === currentDayIndex;
                   const dragSelectionClass = getDragSelectionClass(
                     dayIndex,
@@ -754,6 +858,29 @@ export function WeeklyGrid({
                   const timeLineOffset =
                     (currentTimePosition - timeIndex) * 100;
 
+                  // In limit mode, disallowed cells are still interactive
+                  // In nominate/lock modes (and for non-creators), disallowed cells are disabled
+                  const inLimitMode = isCreator && creatorMode === "limit";
+                  const cellDisabledForInteraction =
+                    cellDisallowed && !inLimitMode;
+
+                  // Build className
+                  const cellClasses = [
+                    "grid-cell",
+                    myState !== "blank" ? `state-${myState}` : "",
+                    cellDisallowed ? "disallowed" : "",
+                    cellDisallowed && inLimitMode ? "limit-interactive" : "",
+                    cellLocked ? "locked" : "",
+                    isToday ? "current-day-col" : "",
+                    isToday && timeIndex === TIME_SLOTS.length - 1
+                      ? "current-day-col-last"
+                      : "",
+                    dragSelectionClass,
+                    !inRange ? "opacity-30 pointer-events-none" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
+
                   return (
                     <td
                       key={dayIndex}
@@ -765,15 +892,9 @@ export function WeeklyGrid({
                           );
                         }
                       }}
-                      className={`grid-cell ${
-                        myState !== "blank" ? `state-${myState}` : ""
-                      } ${isNominated ? "nominated" : ""} ${
-                        isLocked ? "locked" : ""
-                      } ${isToday ? `current-day-col${timeIndex === TIME_SLOTS.length - 1 ? " current-day-col-last" : ""}` : ""} ${
-                        dragSelectionClass
-                      } ${!inRange ? "opacity-30 pointer-events-none" : ""}`}
+                      className={cellClasses}
                       onMouseDown={(e) =>
-                        inRange
+                        inRange && !cellDisabledForInteraction
                           ? handleMouseDown(e, dayIndex, timeIndex)
                           : undefined
                       }
@@ -790,7 +911,6 @@ export function WeeklyGrid({
                       {/* Profile icons for other users */}
                       {otherSelections.length > 0 && (
                         <div className="flex flex-wrap gap-px">
-                          {/* Group by state */}
                           {(
                             ["can-do", "cant-do", "maybe"] as const
                           ).map((state) => {
@@ -812,15 +932,15 @@ export function WeeklyGrid({
                                 className={`profile-group ${bgClass}`}
                               >
                                 {stateSelections.map((s) => {
-                                  const profile = profileMap.get(s.profileId);
-                                  if (!profile) return null;
+                                  const prof = profileMap.get(s.profileId);
+                                  if (!prof) return null;
 
-                                  return profile.profileImageUrl ? (
+                                  return prof.profileImageUrl ? (
                                     <img
                                       key={s.profileId}
-                                      src={profile.profileImageUrl}
-                                      alt={profile.displayName}
-                                      title={`${profile.displayName} (${state})`}
+                                      src={prof.profileImageUrl}
+                                      alt={prof.displayName}
+                                      title={`${prof.displayName} (${state})`}
                                       className="profile-icon"
                                     />
                                   ) : (
@@ -832,9 +952,9 @@ export function WeeklyGrid({
                                           s.profileId
                                         ),
                                       }}
-                                      title={`${profile.displayName} (${state})`}
+                                      title={`${prof.displayName} (${state})`}
                                     >
-                                      {getInitials(profile.displayName)}
+                                      {getInitials(prof.displayName)}
                                     </span>
                                   );
                                 })}
@@ -855,7 +975,7 @@ export function WeeklyGrid({
       {/* Selection box overlay */}
       {selectionRect && (
         <div
-          className="selection-box"
+          className={selectionBoxClass}
           style={{
             left: selectionRect.left,
             top: selectionRect.top,

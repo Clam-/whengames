@@ -12,7 +12,8 @@ import { detectTimezone, getWeekDates } from "../lib/timezone";
 import { DateTime } from "luxon";
 
 type SelectMode = "auto" | "can-do" | "cant-do" | "maybe";
-type CreatorMode = "nominate" | "lock" | null;
+type AllowMode = "auto" | "allow" | "dont-allow";
+type CreatorMode = "limit" | "nominate" | "lock" | null;
 
 export function ScheduleView() {
   const { id } = useParams<{ id: string }>();
@@ -34,10 +35,11 @@ export function ScheduleView() {
   const setSelectionMut = useMutation(api.selections.set);
   const removeSelectionMut = useMutation(api.selections.remove);
   const batchSetMut = useMutation(api.selections.batchSet);
-  const setNominatedSlots = useMutation(api.schedules.setNominatedSlots);
+  const setDisallowedSlots = useMutation(api.schedules.setDisallowedSlots);
   const setLockedSlots = useMutation(api.schedules.setLockedSlots);
 
   const [selectMode, setSelectMode] = useState<SelectMode>("auto");
+  const [allowMode, setAllowMode] = useState<AllowMode>("auto");
   const [creatorMode, setCreatorMode] = useState<CreatorMode>(null);
   const [weekOffset, setWeekOffset] = useState(0);
   const [hasName, setHasName] = useState(false);
@@ -46,6 +48,13 @@ export function ScheduleView() {
   const isCreator = profile && schedule
     ? schedule.creatorProfileId === profile._id
     : false;
+
+  // Default to "limit" mode for creators
+  useEffect(() => {
+    if (isCreator && creatorMode === null) {
+      setCreatorMode("limit");
+    }
+  }, [isCreator, creatorMode]);
 
   // Determine if user can interact with the grid
   const canInteract =
@@ -140,23 +149,24 @@ export function ScheduleView() {
     [id, profile, timezone, batchSetMut]
   );
 
-  const handleNominateOrLock = useCallback(
+  const handleCreatorSlotChange = useCallback(
     async (slots: { dayKey: string; timeSlot: string }[]) => {
       if (!isCreator || !schedule) return;
 
-      if (creatorMode === "nominate") {
-        await setNominatedSlots({
+      if (creatorMode === "limit") {
+        await setDisallowedSlots({
           scheduleId: schedule._id,
           slots,
         });
-      } else {
+      } else if (creatorMode === "lock") {
         await setLockedSlots({
           scheduleId: schedule._id,
           slots,
         });
       }
+      // nominate mode: handled through regular cell changes
     },
-    [isCreator, schedule, creatorMode, setNominatedSlots, setLockedSlots]
+    [isCreator, schedule, creatorMode, setDisallowedSlots, setLockedSlots]
   );
 
   if (!schedule) {
@@ -267,19 +277,31 @@ export function ScheduleView() {
 
         {/* Controls bar */}
         <div className="flex items-center gap-4 mb-3 flex-wrap">
-          {/* Select mode */}
+          {/* Apply mode / Select mode */}
           <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-gray-600">Mode:</label>
-            <select
-              value={selectMode}
-              onChange={(e) => setSelectMode(e.target.value as SelectMode)}
-              className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="auto">Auto</option>
-              <option value="can-do">Can Do</option>
-              <option value="cant-do">Can&apos;t Do</option>
-              <option value="maybe">Maybe</option>
-            </select>
+            <label className="text-xs font-medium text-gray-600">Apply:</label>
+            {isCreator && creatorMode === "limit" ? (
+              <select
+                value={allowMode}
+                onChange={(e) => setAllowMode(e.target.value as AllowMode)}
+                className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                <option value="auto">Auto</option>
+                <option value="allow">Allow</option>
+                <option value="dont-allow">Don&apos;t Allow</option>
+              </select>
+            ) : (
+              <select
+                value={selectMode}
+                onChange={(e) => setSelectMode(e.target.value as SelectMode)}
+                className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="auto">Auto</option>
+                <option value="can-do">Can Do</option>
+                <option value="cant-do">Can&apos;t Do</option>
+                <option value="maybe">Maybe</option>
+              </select>
+            )}
           </div>
 
           {/* Legend */}
@@ -298,14 +320,21 @@ export function ScheduleView() {
             </span>
           </div>
 
-          {/* Creator controls */}
+          {/* Creator mode buttons (radio-style) */}
           {isCreator && (
-            <div className="flex items-center gap-2 ml-auto">
-              <label className="text-xs font-medium text-gray-600">
-                Creator:
-              </label>
+            <div className="flex items-center gap-1 ml-auto">
               <button
-                onClick={() => setCreatorMode(creatorMode === "nominate" ? null : "nominate")}
+                onClick={() => setCreatorMode("limit")}
+                className={`text-xs px-2 py-1 rounded ${
+                  creatorMode === "limit"
+                    ? "bg-green-100 text-green-700 font-medium"
+                    : "text-gray-500 hover:bg-gray-100"
+                }`}
+              >
+                Allow/Disallow Time
+              </button>
+              <button
+                onClick={() => setCreatorMode("nominate")}
                 className={`text-xs px-2 py-1 rounded ${
                   creatorMode === "nominate"
                     ? "bg-blue-100 text-blue-700 font-medium"
@@ -315,7 +344,7 @@ export function ScheduleView() {
                 Nominate Time
               </button>
               <button
-                onClick={() => setCreatorMode(creatorMode === "lock" ? null : "lock")}
+                onClick={() => setCreatorMode("lock")}
                 className={`text-xs px-2 py-1 rounded ${
                   creatorMode === "lock"
                     ? "bg-purple-100 text-purple-700 font-medium"
@@ -369,13 +398,14 @@ export function ScheduleView() {
           userTimezone={timezone}
           weekStartDay={weekStartDay}
           selectMode={selectMode}
+          allowMode={allowMode}
           weekOffset={weekOffset}
           canInteract={canInteract}
           isCreator={!!isCreator}
           creatorMode={creatorMode}
           onCellChange={handleCellChange}
           onBatchChange={handleBatchChange}
-          onNominateOrLock={handleNominateOrLock}
+          onCreatorSlotChange={handleCreatorSlotChange}
         />
       </main>
     </div>

@@ -32,8 +32,8 @@ export default defineSchema({
     // For recurring: optional start date
     recurringStartDate: v.optional(v.string()), // ISO date
     creatorTimezone: v.string(),
-    // Creator's nominated or locked-in time slots
-    nominatedSlots: v.optional(
+    // Disallowed time slots (for allow/disallow mode)
+    disallowedSlots: v.optional(
       v.array(
         v.object({
           dayKey: v.string(),
@@ -41,6 +41,7 @@ export default defineSchema({
         })
       )
     ),
+    // Locked-in time slots
     lockedSlots: v.optional(
       v.array(
         v.object({

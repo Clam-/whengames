@@ -8,10 +8,9 @@
   --color-cant-do-bg: #fee2e2;
   --color-maybe: #eab308;
   --color-maybe-bg: #fef9c3;
-  --color-nominated: #3b82f6;
-  --color-nominated-bg: #dbeafe;
   --color-locked: #8b5cf6;
   --color-locked-bg: #ede9fe;
+  --color-limit: #22c55e;
 }
 
 /* Compact grid styles */
@@ -35,9 +34,67 @@
   @apply bg-maybe-bg;
 }
 
-.grid-cell.nominated {
-  @apply ring-2 ring-nominated ring-inset;
+/* Disallowed cell styling */
+.grid-cell.disallowed {
+  background-color: #f3f4f6;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 3px,
+    rgba(156, 163, 175, 0.15) 3px,
+    rgba(156, 163, 175, 0.15) 6px
+  );
 }
+
+.grid-cell.disallowed:not(.limit-interactive) {
+  pointer-events: none;
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.grid-cell.disallowed.limit-interactive {
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.grid-cell.disallowed.limit-interactive:hover {
+  opacity: 0.85;
+  border-color: var(--color-limit);
+}
+
+/* Muted state backgrounds for disallowed cells that have existing nominations */
+.grid-cell.disallowed.state-can-do {
+  background-color: #e0e5e1;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 3px,
+    rgba(156, 163, 175, 0.12) 3px,
+    rgba(156, 163, 175, 0.12) 6px
+  );
+}
+.grid-cell.disallowed.state-cant-do {
+  background-color: #e5e0e0;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 3px,
+    rgba(156, 163, 175, 0.12) 3px,
+    rgba(156, 163, 175, 0.12) 6px
+  );
+}
+.grid-cell.disallowed.state-maybe {
+  background-color: #e5e4e0;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 3px,
+    rgba(156, 163, 175, 0.12) 3px,
+    rgba(156, 163, 175, 0.12) 6px
+  );
+}
+
+/* Locked cell styling */
 .grid-cell.locked {
   @apply ring-2 ring-locked ring-inset;
 }
@@ -47,11 +104,21 @@
   @apply fixed border-2 border-blue-500 bg-blue-500/10 pointer-events-none z-50;
 }
 
-/* Drag selection visual feedback for creator modes (uses box-shadow to avoid ring conflicts) */
-.grid-cell.drag-select-nominate {
-  box-shadow: inset 0 0 0 2px var(--color-nominated);
+.selection-box.limit {
+  border-color: var(--color-limit);
+  background-color: rgba(34, 197, 94, 0.1);
 }
-.grid-cell.drag-select-lock {
+
+.selection-box.lock {
+  border-color: var(--color-locked);
+  background-color: rgba(139, 92, 246, 0.1);
+}
+
+/* Drag selection visual feedback for creator modes (uses box-shadow to avoid ring conflicts) */
+.drag-select-limit {
+  box-shadow: inset 0 0 0 2px var(--color-limit);
+}
+.drag-select-lock {
   box-shadow: inset 0 0 0 2px var(--color-locked);
 }
 
@@ -60,7 +127,7 @@
   @apply absolute left-0 right-0 border-t-2 border-red-500 z-20 pointer-events-none;
 }
 
-/* Current day column highlight — faint outline around the whole column, not each cell */
+/* Current day column highlight */
 .current-day-header {
   border-left: 2px solid #93c5fd;
   border-right: 2px solid #93c5fd;
@@ -104,6 +171,17 @@
 }
 .profile-group.maybe {
   @apply bg-maybe/30;
+}
+
+/* Muted profile groups in disallowed cells */
+.grid-cell.disallowed .profile-group.can-do {
+  background-color: rgba(140, 160, 148, 0.3);
+}
+.grid-cell.disallowed .profile-group.cant-do {
+  background-color: rgba(160, 140, 140, 0.3);
+}
+.grid-cell.disallowed .profile-group.maybe {
+  background-color: rgba(160, 155, 140, 0.3);
 }
 
 .profile-icon {

@@ -116,8 +116,8 @@ export const update = mutation({
   },
 });
 
-// Set nominated time slots (creator only)
-export const setNominatedSlots = mutation({
+// Set disallowed time slots (creator allow/disallow mode)
+export const setDisallowedSlots = mutation({
   args: {
     scheduleId: v.id("schedules"),
     slots: v.array(
@@ -129,8 +129,7 @@ export const setNominatedSlots = mutation({
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.scheduleId, {
-      nominatedSlots: args.slots,
-      isLocked: false,
+      disallowedSlots: args.slots,
     });
   },
 });
