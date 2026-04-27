@@ -78,6 +78,36 @@ export default defineSchema({
     .index("by_schedule_profile", ["scheduleId", "profileId"])
     .index("by_schedule_day_time", ["scheduleId", "dayKey", "timeSlot"]),
 
+  // Saved weekly availabilities (SSO users only)
+  savedAvailabilities: defineTable({
+    profileId: v.id("userProfiles"),
+    name: v.string(),
+    isDefault: v.optional(v.boolean()),
+    timezone: v.string(),
+    slots: v.array(
+      v.object({
+        dayKey: v.string(), // "0"-"6" day of week
+        timeSlot: v.string(), // "HH:mm"
+        state: v.union(
+          v.literal("can-do"),
+          v.literal("cant-do"),
+          v.literal("maybe")
+        ),
+      })
+    ),
+  }).index("by_profileId", ["profileId"]),
+
+  // Links a saved availability to a schedule for a user
+  availabilityLinks: defineTable({
+    savedAvailabilityId: v.id("savedAvailabilities"),
+    scheduleId: v.id("schedules"),
+    profileId: v.id("userProfiles"),
+  })
+    .index("by_schedule_profile", ["scheduleId", "profileId"])
+    .index("by_scheduleId", ["scheduleId"])
+    .index("by_savedAvailability", ["savedAvailabilityId"])
+    .index("by_profileId", ["profileId"]),
+
   // DST notification check log
   dstCheckLog: defineTable({
     scheduleId: v.id("schedules"),

@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { Id } from "./_generated/dataModel";
 
 // List all schedules (public)
 export const list = query({
@@ -30,7 +31,7 @@ export const list = query({
   },
 });
 
-// Get a single schedule with all its selections
+// Get a single schedule with all its selections (including virtual ones from linked availabilities)
 export const get = query({
   args: { scheduleId: v.id("schedules") },
   handler: async (ctx, args) => {
@@ -40,16 +41,114 @@ export const get = query({
     const creator = await ctx.db.get(schedule.creatorProfileId);
 
     // Get all selections for this schedule
-    const selections = await ctx.db
+    let selections = await ctx.db
       .query("selections")
       .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
       .collect();
 
-    // Get all unique profile IDs from selections
-    const profileIds = [...new Set(selections.map((s) => s.profileId))];
+    // Get availability links for this schedule
+    const links = await ctx.db
+      .query("availabilityLinks")
+      .withIndex("by_scheduleId", (q) => q.eq("scheduleId", args.scheduleId))
+      .collect();
+
+    const linkedProfileIds = new Set(links.map((l) => l.profileId.toString()));
+
+    // Filter out non-exception selections for linked profiles
+    // (their recurring data comes from the saved availability)
+    if (links.length > 0) {
+      selections = selections.filter((sel) => {
+        if (linkedProfileIds.has(sel.profileId.toString())) {
+          return sel.isException === true;
+        }
+        return true;
+      });
+    }
+
+    // Build virtual selections from linked saved availabilities
+    type VirtualSelection = {
+      _id: string;
+      scheduleId: typeof args.scheduleId;
+      profileId: typeof schedule.creatorProfileId;
+      dayKey: string;
+      timeSlot: string;
+      timezone: string;
+      state: "can-do" | "cant-do" | "maybe";
+      isException?: boolean;
+      exceptionDate?: string;
+    };
+    const virtualSelections: VirtualSelection[] = [];
+
+    // Collect link info for the frontend
+    const availabilityLinkInfo: {
+      profileId: string;
+      savedAvailabilityId: string;
+      savedAvailabilityName: string;
+    }[] = [];
+
+    for (const link of links) {
+      const savedAvail = await ctx.db.get(link.savedAvailabilityId);
+      if (!savedAvail) continue;
+
+      availabilityLinkInfo.push({
+        profileId: link.profileId,
+        savedAvailabilityId: link.savedAvailabilityId,
+        savedAvailabilityName: savedAvail.name,
+      });
+
+      for (const slot of savedAvail.slots) {
+        virtualSelections.push({
+          _id: `virtual_${link._id}_${slot.dayKey}_${slot.timeSlot}`,
+          scheduleId: args.scheduleId,
+          profileId: link.profileId,
+          dayKey: slot.dayKey,
+          timeSlot: slot.timeSlot,
+          timezone: savedAvail.timezone,
+          state: slot.state,
+        });
+      }
+    }
+
+    // Normalize selections to a common shape for the frontend
+    const normalizedSelections = selections.map((s) => ({
+      _id: s._id as string,
+      scheduleId: s.scheduleId as string,
+      profileId: s.profileId as string,
+      dayKey: s.dayKey,
+      timeSlot: s.timeSlot,
+      timezone: s.timezone,
+      state: s.state,
+      isException: s.isException,
+      exceptionDate: s.exceptionDate,
+    }));
+
+    const allSelections = [
+      ...normalizedSelections,
+      ...virtualSelections.map((v) => ({
+        _id: v._id,
+        scheduleId: v.scheduleId as string,
+        profileId: v.profileId as string,
+        dayKey: v.dayKey,
+        timeSlot: v.timeSlot,
+        timezone: v.timezone,
+        state: v.state,
+        isException: v.isException,
+        exceptionDate: v.exceptionDate,
+      })),
+    ];
+
+    // Get all unique profile IDs from all selections + linked profiles
+    const profileIdSet = new Set<string>();
+    for (const sel of allSelections) {
+      profileIdSet.add(sel.profileId);
+    }
+    for (const link of links) {
+      profileIdSet.add(link.profileId);
+    }
+
     const profilesRaw = await Promise.all(
-      profileIds.map(async (id) => {
-        const profile = await ctx.db.get(id);
+      [...profileIdSet].map(async (id) => {
+        const profile = await ctx.db.get(id as Id<"userProfiles">);
         return profile
           ? {
               _id: profile._id,
@@ -60,17 +159,16 @@ export const get = query({
           : null;
       })
     );
-    const profiles = profilesRaw.filter(
-      (p) => p !== null
-    );
+    const profiles = profilesRaw.filter((p) => p !== null);
 
     return {
       ...schedule,
       creatorName: creator?.displayName ?? "Unknown",
       creatorImage: creator?.profileImageUrl,
       creatorTimezoneStored: creator?.timezone ?? schedule.creatorTimezone,
-      selections,
+      selections: allSelections,
       profiles,
+      availabilityLinks: availabilityLinkInfo,
     };
   },
 });

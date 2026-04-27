@@ -7,6 +7,10 @@ import { Header } from "./Header";
 import { WeeklyGrid } from "./WeeklyGrid";
 import { DisplayNamePrompt } from "./DisplayNamePrompt";
 import { ClearConfirmModal } from "./ClearConfirmModal";
+import { AvailabilitiesMenu } from "./AvailabilitiesMenu";
+import { ApplyAvailabilityModal } from "./ApplyAvailabilityModal";
+import { SaveAvailabilityModal } from "./SaveAvailabilityModal";
+import { ManageSavedAvailabilitiesModal } from "./ManageSavedAvailabilitiesModal";
 import { useAnonymousUser } from "../hooks/useAnonymousUser";
 import { useTimezone } from "../hooks/useTimezone";
 import { detectTimezone, getWeekDates } from "../lib/timezone";
@@ -48,6 +52,28 @@ export function ScheduleView() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [hasName, setHasName] = useState(false);
   const [showClearModal, setShowClearModal] = useState(false);
+  const [showApplyModal, setShowApplyModal] = useState(false);
+  const [showSaveNewModal, setShowSaveNewModal] = useState(false);
+  const [showManageModal, setShowManageModal] = useState(false);
+
+  // Saved availabilities (only for SSO users)
+  const isSsoUser = profile?.authType === "sso";
+  const savedAvailabilities = useQuery(
+    api.savedAvailabilities.listForProfile,
+    isSsoUser && profile?._id ? { profileId: profile._id } : "skip"
+  );
+
+  // Availability link mutations
+  const applyToScheduleMut = useMutation(api.savedAvailabilities.applyToSchedule);
+  const saveNewAndLinkMut = useMutation(api.savedAvailabilities.saveNewAndLink);
+  const saveOverwriteDefaultMut = useMutation(api.savedAvailabilities.saveOverwriteDefaultAndLink);
+  const unlinkFromScheduleMut = useMutation(api.savedAvailabilities.unlinkFromSchedule);
+
+  // Derive current link from schedule data
+  const profileIdStr = profile?._id ? String(profile._id) : null;
+  const currentLink = schedule?.availabilityLinks?.find(
+    (l: any) => String(l.profileId) === profileIdStr
+  ) ?? null;
 
   // Check if current user is the creator
   const isCreator = profile && schedule
@@ -173,6 +199,66 @@ export function ScheduleView() {
     },
     [isCreator, schedule, creatorMode, setDisallowedSlots, setLockedSlots]
   );
+
+  // Availability handlers
+  const handleApply = useCallback(
+    async (savedAvailabilityId: Id<"savedAvailabilities">) => {
+      if (!savedAvailabilityId) {
+        // Signal to open the modal (multiple availabilities)
+        setShowApplyModal(true);
+        return;
+      }
+      if (!profile || !schedule) return;
+      await applyToScheduleMut({
+        savedAvailabilityId,
+        scheduleId: schedule._id,
+        profileId: profile._id,
+      });
+    },
+    [profile, schedule, applyToScheduleMut]
+  );
+
+  const handleApplyFromModal = useCallback(
+    async (savedAvailabilityId: Id<"savedAvailabilities">) => {
+      if (!profile || !schedule) return;
+      await applyToScheduleMut({
+        savedAvailabilityId,
+        scheduleId: schedule._id,
+        profileId: profile._id,
+      });
+    },
+    [profile, schedule, applyToScheduleMut]
+  );
+
+  const handleSaveOverwriteDefault = useCallback(async () => {
+    if (!profile || !schedule) return;
+    await saveOverwriteDefaultMut({
+      scheduleId: schedule._id,
+      profileId: profile._id,
+      timezone,
+    });
+  }, [profile, schedule, timezone, saveOverwriteDefaultMut]);
+
+  const handleSaveNew = useCallback(
+    async (name: string) => {
+      if (!profile || !schedule) return;
+      await saveNewAndLinkMut({
+        scheduleId: schedule._id,
+        profileId: profile._id,
+        name,
+        timezone,
+      });
+    },
+    [profile, schedule, timezone, saveNewAndLinkMut]
+  );
+
+  const handleUnlink = useCallback(async () => {
+    if (!profile || !schedule) return;
+    await unlinkFromScheduleMut({
+      scheduleId: schedule._id,
+      profileId: profile._id,
+    });
+  }, [profile, schedule, unlinkFromScheduleMut]);
 
   // Clear modal content based on role and creator mode
   const getClearModalContent = () => {
@@ -449,6 +535,23 @@ export function ScheduleView() {
             </div>
           )}
 
+          {/* Availabilities menu (SSO users only) */}
+          {isSsoUser && profile && canInteract && (
+            <AvailabilitiesMenu
+              scheduleType={schedule.type}
+              weekOffset={weekOffset}
+              isSsoUser={!!isSsoUser}
+              profileId={profile._id}
+              savedAvailabilities={savedAvailabilities ?? []}
+              currentLink={currentLink}
+              onApply={handleApply}
+              onSaveOverwriteDefault={handleSaveOverwriteDefault}
+              onSaveNew={() => setShowSaveNewModal(true)}
+              onUnlink={handleUnlink}
+              onManage={() => setShowManageModal(true)}
+            />
+          )}
+
           {/* Clear button */}
           {canInteract && (
             <button
@@ -524,6 +627,35 @@ export function ScheduleView() {
           />
         );
       })()}
+
+      {/* Apply availability modal */}
+      {showApplyModal && savedAvailabilities && (
+        <ApplyAvailabilityModal
+          savedAvailabilities={savedAvailabilities}
+          onApply={handleApplyFromModal}
+          onManage={() => {
+            setShowApplyModal(false);
+            setShowManageModal(true);
+          }}
+          onClose={() => setShowApplyModal(false)}
+        />
+      )}
+
+      {/* Save new availability modal */}
+      {showSaveNewModal && (
+        <SaveAvailabilityModal
+          onSave={handleSaveNew}
+          onClose={() => setShowSaveNewModal(false)}
+        />
+      )}
+
+      {/* Manage saved availabilities modal */}
+      {showManageModal && savedAvailabilities && (
+        <ManageSavedAvailabilitiesModal
+          savedAvailabilities={savedAvailabilities}
+          onClose={() => setShowManageModal(false)}
+        />
+      )}
     </div>
   );
 }
