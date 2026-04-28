@@ -160,8 +160,9 @@ docker run -p 80:80 when-games
 
 ### Creator Controls
 
-- **Nominate time**: Highlights potential times (blue ring)
-- **Lock in time**: Confirms the final time (purple ring)
+- **Allow/Disallow time**: Toggles cells to be disallowed/allow
+- **Nominate time**: Shows your profile icon on nominated cells like non-creators
+- **Lock in time**: Indicates the final time(s) (purple outline)
 
 ## Key Files
 

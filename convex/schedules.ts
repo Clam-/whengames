@@ -2,6 +2,17 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 
+/**
+ * Get the JS day-of-week (0=Sunday, 6=Saturday) from an ISO date string.
+ * Uses UTC to avoid any local timezone influence — the ISO date string
+ * already represents the correct local date for the user.
+ */
+function getDayOfWeekFromISODate(isoDate: string): number {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCDay();
+}
+
 // List all schedules (public)
 export const list = query({
   args: {},
@@ -202,20 +213,203 @@ export const create = mutation({
   },
 });
 
-// Update schedule metadata
+// Update schedule metadata (creator only)
 export const update = mutation({
   args: {
     scheduleId: v.id("schedules"),
     title: v.optional(v.string()),
     description: v.optional(v.string()),
+    type: v.optional(v.union(v.literal("one-off"), v.literal("recurring"))),
+    dateRangeStart: v.optional(v.string()),
+    dateRangeEnd: v.optional(v.string()),
+    recurringStartDate: v.optional(v.string()),
+    isPrivate: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const { scheduleId, ...updates } = args;
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (!schedule) return;
+
     const cleanUpdates: Record<string, unknown> = {};
-    if (updates.title !== undefined) cleanUpdates.title = updates.title;
-    if (updates.description !== undefined)
-      cleanUpdates.description = updates.description;
-    await ctx.db.patch(scheduleId, cleanUpdates);
+    if (args.title !== undefined) cleanUpdates.title = args.title;
+    if (args.description !== undefined) cleanUpdates.description = args.description;
+    if (args.isPrivate !== undefined) cleanUpdates.isPrivate = args.isPrivate || undefined;
+
+    // Type change: only one-off -> recurring is allowed
+    if (args.type !== undefined && args.type !== schedule.type) {
+      if (schedule.type === "recurring") {
+        // Disallow recurring -> one-off
+        return;
+      }
+
+      cleanUpdates.type = args.type;
+      // Clear one-off specific fields
+      cleanUpdates.dateRangeStart = undefined;
+      cleanUpdates.dateRangeEnd = undefined;
+      // Set recurring fields
+      if (args.recurringStartDate !== undefined) {
+        cleanUpdates.recurringStartDate = args.recurringStartDate;
+      }
+
+      // ── Convert selections from date-keyed to day-of-week-keyed ──
+      //
+      // One-off selections store dayKey as an ISO date ("2026-04-24")
+      // with the timeSlot and timezone representing wall-clock time in
+      // the user's timezone. Recurring selections store dayKey as a
+      // day-of-week ("0"-"6"). The timeSlot and timezone are identical
+      // in both formats, so we only need to convert the dayKey.
+      //
+      // When multiple dates map to the same (profileId, dow, timeSlot),
+      // the most recent date's state wins since it best reflects the
+      // user's current availability.
+      const selections = await ctx.db
+        .query("selections")
+        .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
+        .collect();
+
+      // Group by (profileId, dow, timeSlot) to resolve conflicts
+      const selectionMap = new Map<
+        string,
+        {
+          profileId: Id<"userProfiles">;
+          dow: number;
+          timeSlot: string;
+          timezone: string;
+          state: "can-do" | "cant-do" | "maybe";
+          sourceDate: string; // for conflict resolution
+        }
+      >();
+
+      for (const sel of selections) {
+        const dow = getDayOfWeekFromISODate(sel.dayKey);
+        const key = `${sel.profileId}|${dow}|${sel.timeSlot}`;
+        const existing = selectionMap.get(key);
+
+        // Most recent date wins
+        if (!existing || sel.dayKey > existing.sourceDate) {
+          selectionMap.set(key, {
+            profileId: sel.profileId,
+            dow,
+            timeSlot: sel.timeSlot,
+            timezone: sel.timezone,
+            state: sel.state,
+            sourceDate: sel.dayKey,
+          });
+        }
+      }
+
+      // Delete all old selections
+      for (const sel of selections) {
+        await ctx.db.delete(sel._id);
+      }
+
+      // Insert converted recurring selections
+      for (const [, converted] of selectionMap) {
+        await ctx.db.insert("selections", {
+          scheduleId: args.scheduleId,
+          profileId: converted.profileId,
+          dayKey: String(converted.dow),
+          timeSlot: converted.timeSlot,
+          timezone: converted.timezone,
+          state: converted.state,
+        });
+      }
+
+      // ── Convert disallowed slots ──
+      // Union: if a (dow, timeSlot) was disallowed on any date, keep it.
+      const currentDisallowed = schedule.disallowedSlots || [];
+      const disallowedMap = new Map<
+        string,
+        { dayKey: string; timeSlot: string }
+      >();
+      for (const slot of currentDisallowed) {
+        const dow = getDayOfWeekFromISODate(slot.dayKey);
+        const key = `${dow}|${slot.timeSlot}`;
+        disallowedMap.set(key, {
+          dayKey: String(dow),
+          timeSlot: slot.timeSlot,
+        });
+      }
+      cleanUpdates.disallowedSlots = [...disallowedMap.values()];
+
+      // ── Convert locked slots ──
+      // Union: if a (dow, timeSlot) was locked on any date, keep it.
+      // Also filter out any that are now disallowed.
+      const currentLocked = schedule.lockedSlots || [];
+      const lockedMap = new Map<
+        string,
+        { dayKey: string; timeSlot: string }
+      >();
+      for (const slot of currentLocked) {
+        const dow = getDayOfWeekFromISODate(slot.dayKey);
+        const key = `${dow}|${slot.timeSlot}`;
+        if (!disallowedMap.has(key)) {
+          lockedMap.set(key, {
+            dayKey: String(dow),
+            timeSlot: slot.timeSlot,
+          });
+        }
+      }
+      cleanUpdates.lockedSlots = [...lockedMap.values()];
+      cleanUpdates.isLocked = lockedMap.size > 0;
+
+      // Availability links are kept — saved availabilities already use
+      // day-of-week keys, so they work correctly with recurring schedules.
+    } else {
+      // Same type — update date fields
+      if (args.type === "one-off" || schedule.type === "one-off") {
+        if (args.dateRangeStart !== undefined)
+          cleanUpdates.dateRangeStart = args.dateRangeStart;
+        if (args.dateRangeEnd !== undefined)
+          cleanUpdates.dateRangeEnd = args.dateRangeEnd;
+      }
+      if (args.type === "recurring" || schedule.type === "recurring") {
+        if (args.recurringStartDate !== undefined)
+          cleanUpdates.recurringStartDate = args.recurringStartDate;
+      }
+    }
+
+    await ctx.db.patch(args.scheduleId, cleanUpdates);
+  },
+});
+
+// Delete a schedule and all related data (creator only)
+export const remove = mutation({
+  args: {
+    scheduleId: v.id("schedules"),
+  },
+  handler: async (ctx, args) => {
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (!schedule) return;
+
+    // Delete all selections
+    const selections = await ctx.db
+      .query("selections")
+      .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
+      .collect();
+    for (const sel of selections) {
+      await ctx.db.delete(sel._id);
+    }
+
+    // Delete all availability links
+    const links = await ctx.db
+      .query("availabilityLinks")
+      .withIndex("by_scheduleId", (q) => q.eq("scheduleId", args.scheduleId))
+      .collect();
+    for (const link of links) {
+      await ctx.db.delete(link._id);
+    }
+
+    // Delete DST check logs
+    const dstLogs = await ctx.db
+      .query("dstCheckLog")
+      .withIndex("by_schedule_profile_date", (q) => q.eq("scheduleId", args.scheduleId))
+      .collect();
+    for (const log of dstLogs) {
+      await ctx.db.delete(log._id);
+    }
+
+    // Delete the schedule itself
+    await ctx.db.delete(args.scheduleId);
   },
 });
 
@@ -235,9 +429,17 @@ export const setDisallowedSlots = mutation({
     const schedule = await ctx.db.get(args.scheduleId);
     if (!schedule) return;
 
+    // For one-off schedules, filter out slots outside date range
+    let filteredSlots = args.slots;
+    if (schedule.type === "one-off" && schedule.dateRangeStart && schedule.dateRangeEnd) {
+      filteredSlots = args.slots.filter(
+        (s) => s.dayKey >= schedule.dateRangeStart! && s.dayKey <= schedule.dateRangeEnd!
+      );
+    }
+
     // Build a set of the new disallowed keys for fast lookup
     const disallowedKeys = new Set(
-      args.slots.map((s) => `${s.dayKey}|${s.timeSlot}`)
+      filteredSlots.map((s) => `${s.dayKey}|${s.timeSlot}`)
     );
 
     // Remove any locked slots that are now disallowed
@@ -247,7 +449,7 @@ export const setDisallowedSlots = mutation({
     );
 
     await ctx.db.patch(args.scheduleId, {
-      disallowedSlots: args.slots,
+      disallowedSlots: filteredSlots,
       lockedSlots: filteredLocked,
     });
   },
@@ -275,9 +477,16 @@ export const setLockedSlots = mutation({
         (s) => `${s.dayKey}|${s.timeSlot}`
       )
     );
-    const filteredSlots = args.slots.filter(
+    let filteredSlots = args.slots.filter(
       (s) => !disallowedKeys.has(`${s.dayKey}|${s.timeSlot}`)
     );
+
+    // For one-off schedules, also filter out slots outside date range
+    if (schedule.type === "one-off" && schedule.dateRangeStart && schedule.dateRangeEnd) {
+      filteredSlots = filteredSlots.filter(
+        (s) => s.dayKey >= schedule.dateRangeStart! && s.dayKey <= schedule.dateRangeEnd!
+      );
+    }
 
     await ctx.db.patch(args.scheduleId, {
       lockedSlots: filteredSlots,

@@ -375,6 +375,12 @@ export function WeeklyGrid({
     (dayIndex: number, timeIndex: number) => {
       if (!canInteract) return;
 
+      // Prevent interactions outside date range for one-off schedules
+      if (schedule.type === "one-off" && schedule.dateRangeStart && schedule.dateRangeEnd) {
+        const dateStr = weekDates[dayIndex]?.toISODate() || "";
+        if (dateStr < schedule.dateRangeStart || dateStr > schedule.dateRangeEnd) return;
+      }
+
       const { dayKey, timeSlot } = toStorageKeys(dayIndex, timeIndex);
       const slotKey = `${dayKey}|${timeSlot}`;
 
@@ -439,6 +445,10 @@ export function WeeklyGrid({
     },
     [
       canInteract,
+      schedule.type,
+      schedule.dateRangeStart,
+      schedule.dateRangeEnd,
+      weekDates,
       isCreator,
       creatorMode,
       selectMode,
@@ -545,8 +555,14 @@ export function WeeklyGrid({
           dragStartRef.current.timeIndex
         );
       } else if (dragActive) {
-        // Drag complete — collect selected cells
-        const selectedCells = getSelectedCells();
+        // Drag complete — collect selected cells, filtering out any outside the date range
+        const selectedCells = getSelectedCells().filter((cell) => {
+          if (schedule.type === "one-off" && schedule.dateRangeStart && schedule.dateRangeEnd) {
+            const dateStr = weekDates[cell.dayIndex]?.toISODate() || "";
+            return dateStr >= schedule.dateRangeStart && dateStr <= schedule.dateRangeEnd;
+          }
+          return true;
+        });
         if (selectedCells.length > 0) {
           if (isCreator && creatorMode === "limit") {
             // Allow/Disallow mode: update disallowedSlots
@@ -661,6 +677,10 @@ export function WeeklyGrid({
     creatorMode,
     onCreatorSlotChange,
     isCellDisallowed,
+    schedule.type,
+    schedule.dateRangeStart,
+    schedule.dateRangeEnd,
+    weekDates,
     disallowedSet,
     lockedSet,
     schedule.disallowedSlots,

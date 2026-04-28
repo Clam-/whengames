@@ -89,6 +89,17 @@ export const set = mutation({
       return null;
     }
 
+    // Guard: reject changes outside one-off schedule date range
+    if (schedule && schedule.type === "one-off") {
+      if (
+        schedule.dateRangeStart &&
+        schedule.dateRangeEnd &&
+        (args.dayKey < schedule.dateRangeStart || args.dayKey > schedule.dateRangeEnd)
+      ) {
+        return null;
+      }
+    }
+
     // Check for linked availability (only for non-exception changes)
     if (!args.isException) {
       const link = await getAvailabilityLink(
@@ -173,6 +184,17 @@ export const remove = mutation({
       return;
     }
 
+    // Guard: reject changes outside one-off schedule date range
+    if (schedule && schedule.type === "one-off") {
+      if (
+        schedule.dateRangeStart &&
+        schedule.dateRangeEnd &&
+        (args.dayKey < schedule.dateRangeStart || args.dayKey > schedule.dateRangeEnd)
+      ) {
+        return;
+      }
+    }
+
     // Check for linked availability (only for non-exception changes)
     if (!args.isException) {
       const link = await getAvailabilityLink(
@@ -238,9 +260,16 @@ export const batchSet = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    // Load schedule once to check disallowed slots
+    // Load schedule once to check disallowed slots and date range
     const schedule = await ctx.db.get(args.scheduleId);
     const disallowed = schedule?.disallowedSlots;
+
+    // Helper to check if a dayKey is within one-off schedule date range
+    const isInDateRange = (dayKey: string): boolean => {
+      if (schedule?.type !== "one-off") return true;
+      if (!schedule.dateRangeStart || !schedule.dateRangeEnd) return true;
+      return dayKey >= schedule.dateRangeStart && dayKey <= schedule.dateRangeEnd;
+    };
 
     // Check for linked availability
     const link = await getAvailabilityLink(
@@ -255,7 +284,7 @@ export const batchSet = mutation({
       if (savedAvail) {
         let slots = [...savedAvail.slots];
         const nonExceptionSels = args.selections.filter(
-          (s) => !s.isException && !isSlotDisallowed(disallowed, s.dayKey, s.timeSlot)
+          (s) => !s.isException && !isSlotDisallowed(disallowed, s.dayKey, s.timeSlot) && isInDateRange(s.dayKey)
         );
 
         for (const sel of nonExceptionSels) {
@@ -331,7 +360,7 @@ export const batchSet = mutation({
 
     // Not linked — original behavior
     for (const sel of args.selections) {
-      if (isSlotDisallowed(disallowed, sel.dayKey, sel.timeSlot)) {
+      if (isSlotDisallowed(disallowed, sel.dayKey, sel.timeSlot) || !isInDateRange(sel.dayKey)) {
         continue;
       }
 

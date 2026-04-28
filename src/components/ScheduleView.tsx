@@ -11,6 +11,7 @@ import { AvailabilitiesMenu } from "./AvailabilitiesMenu";
 import { ApplyAvailabilityModal } from "./ApplyAvailabilityModal";
 import { SaveAvailabilityModal } from "./SaveAvailabilityModal";
 import { ManageSavedAvailabilitiesModal } from "./ManageSavedAvailabilitiesModal";
+import { EditScheduleModal } from "./EditScheduleModal";
 import { useAnonymousUser } from "../hooks/useAnonymousUser";
 import { useTimezone } from "../hooks/useTimezone";
 import { detectTimezone, getWeekDates } from "../lib/timezone";
@@ -55,6 +56,7 @@ export function ScheduleView() {
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [showSaveNewModal, setShowSaveNewModal] = useState(false);
   const [showManageModal, setShowManageModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   // Saved availabilities (only for SSO users)
   const isSsoUser = profile?.authType === "sso";
@@ -422,10 +424,20 @@ export function ScheduleView() {
                 <span className="text-xs text-gray-400">
                   by {schedule.creatorName}
                 </span>
-                <span className="text-xs text-gray-400">
-                  My timezone: {timezone}
-                </span>
               </div>
+            </div>
+            <div className="flex flex-col items-end gap-2 shrink-0">
+              <span className="text-xs text-gray-400">
+                My timezone: {timezone}
+              </span>
+              {isCreator && (
+                <button
+                  onClick={() => setShowEditModal(true)}
+                  className="text-xs px-3 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400 transition-colors"
+                >
+                  Edit Schedule
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -654,6 +666,14 @@ export function ScheduleView() {
         <ManageSavedAvailabilitiesModal
           savedAvailabilities={savedAvailabilities}
           onClose={() => setShowManageModal(false)}
+        />
+      )}
+
+      {/* Edit schedule modal (creator only) */}
+      {showEditModal && schedule && (
+        <EditScheduleModal
+          schedule={schedule}
+          onClose={() => setShowEditModal(false)}
         />
       )}
     </div>
