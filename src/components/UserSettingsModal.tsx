@@ -90,12 +90,12 @@ function TimezoneSearchSelect({
           setTimeout(() => setIsOpen(false), 200);
         }}
         placeholder="Search timezones..."
-        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-400"
       />
       {isOpen && (
-        <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+        <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto dark:bg-slate-800 dark:border-slate-600">
           {filtered.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-gray-400">
+            <div className="px-3 py-2 text-sm text-gray-400 dark:text-slate-500">
               No matching timezones
             </div>
           ) : (
@@ -103,10 +103,10 @@ function TimezoneSearchSelect({
               <button
                 key={tz}
                 type="button"
-                className={`w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50 ${
+                className={`w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50 dark:hover:bg-blue-900/30 ${
                   tz === value
-                    ? "bg-blue-100 text-blue-700 font-medium"
-                    : "text-gray-700"
+                    ? "bg-blue-100 text-blue-700 font-medium dark:bg-blue-900/50 dark:text-blue-400"
+                    : "text-gray-700 dark:text-slate-300"
                 }`}
                 onMouseDown={(e) => {
                   e.preventDefault(); // Prevent blur
@@ -116,7 +116,7 @@ function TimezoneSearchSelect({
                 }}
               >
                 {formatTzLabel(tz)}
-                <span className="text-xs text-gray-400 ml-1">({tz})</span>
+                <span className="text-xs text-gray-400 ml-1 dark:text-slate-500">({tz})</span>
               </button>
             ))
           )}
@@ -189,19 +189,19 @@ export function UserSettingsModal({ profile, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6 dark:bg-slate-800">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">User Settings</h2>
+          <h2 className="text-lg font-semibold dark:text-slate-100">User Settings</h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+            className="text-gray-400 hover:text-gray-600 text-xl leading-none dark:hover:text-slate-300"
           >
             &times;
           </button>
         </div>
 
         <div className="space-y-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 dark:bg-blue-900/30 dark:border-blue-800">
             <div className="flex items-start gap-3">
               {profile.authType === "sso" && profile.ssoImage && (
                 <img
@@ -211,28 +211,28 @@ export function UserSettingsModal({ profile, onClose }: Props) {
                 />
               )}
               <div className="flex-1">
-                <p className="text-xs font-medium text-blue-900 mb-1">
+                <p className="text-xs font-medium text-blue-900 mb-1 dark:text-blue-300">
                   Account Type
                 </p>
                 {profile.authType === "sso" ? (
-                  <div className="text-xs text-blue-800 space-y-0.5">
+                  <div className="text-xs text-blue-800 space-y-0.5 dark:text-blue-300">
                     <p className="font-medium">SSO (Google Account)</p>
                     {profile.ssoName && (
-                      <p className="text-blue-700">{profile.ssoName}</p>
+                      <p className="text-blue-700 dark:text-blue-400">{profile.ssoName}</p>
                     )}
                     {profile.ssoEmail && (
-                      <p className="text-blue-700">{profile.ssoEmail}</p>
+                      <p className="text-blue-700 dark:text-blue-400">{profile.ssoEmail}</p>
                     )}
                     {!showUnlinkConfirm ? (
                       <button
                         onClick={() => setShowUnlinkConfirm(true)}
-                        className="mt-2 text-xs text-red-600 hover:text-red-700 underline"
+                        className="mt-2 text-xs text-red-600 hover:text-red-700 underline dark:text-rose-400 dark:hover:text-rose-300"
                       >
                         Unlink SSO &amp; convert to cookie account
                       </button>
                     ) : (
-                      <div className="mt-2 bg-red-50 border border-red-200 rounded p-2">
-                        <p className="text-xs text-red-700 mb-2">
+                      <div className="mt-2 bg-red-50 border border-red-200 rounded p-2 dark:bg-rose-900/40 dark:border-rose-800">
+                        <p className="text-xs text-red-700 mb-2 dark:text-rose-400">
                           This will disconnect your Google account. Your data
                           will be stored only in this browser. Are you sure?
                         </p>
@@ -246,7 +246,7 @@ export function UserSettingsModal({ profile, onClose }: Props) {
                           </button>
                           <button
                             onClick={() => setShowUnlinkConfirm(false)}
-                            className="text-xs text-gray-600 px-2 py-1 rounded hover:bg-gray-100"
+                            className="text-xs text-gray-600 px-2 py-1 rounded hover:bg-gray-100 dark:text-slate-400 dark:hover:bg-slate-700"
                           >
                             Cancel
                           </button>
@@ -255,9 +255,9 @@ export function UserSettingsModal({ profile, onClose }: Props) {
                     )}
                   </div>
                 ) : (
-                  <div className="text-xs text-blue-800">
+                  <div className="text-xs text-blue-800 dark:text-blue-300">
                     <p className="font-medium">Cookie User</p>
-                    <p className="text-blue-600 mt-0.5">
+                    <p className="text-blue-600 mt-0.5 dark:text-blue-400">
                       Your identity is stored in this browser only. Link a
                       Google account to access your data from any device.
                     </p>
@@ -268,19 +268,19 @@ export function UserSettingsModal({ profile, onClose }: Props) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
               Display Name
             </label>
             <input
               type="text"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
               Timezone
             </label>
             <TimezoneSearchSelect
@@ -292,13 +292,13 @@ export function UserSettingsModal({ profile, onClose }: Props) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
               Week Starts On
             </label>
             <select
               value={weekStartDay}
               onChange={(e) => setWeekStartDay(Number(e.target.value))}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
             >
               {DAY_NAMES.map((name, i) => (
                 <option key={i} value={i}>
@@ -318,7 +318,7 @@ export function UserSettingsModal({ profile, onClose }: Props) {
             />
             <label
               htmlFor="dst-notifications"
-              className="text-sm text-gray-700"
+              className="text-sm text-gray-700 dark:text-slate-300"
             >
               DST change notifications
             </label>
@@ -327,7 +327,7 @@ export function UserSettingsModal({ profile, onClose }: Props) {
           <div className="flex justify-end gap-3 pt-2">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 dark:text-slate-400 dark:hover:text-slate-200"
             >
               Cancel
             </button>

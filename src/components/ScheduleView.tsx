@@ -336,9 +336,9 @@ export function ScheduleView() {
 
   if (!schedule) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gray-50 dark:bg-slate-900">
         <Header />
-        <div className="text-center py-12 text-gray-400">
+        <div className="text-center py-12 text-gray-400 dark:text-slate-500">
           {schedule === null ? "Schedule not found." : "Loading..."}
         </div>
       </div>
@@ -396,18 +396,18 @@ export function ScheduleView() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-900">
       <Header />
       <main className="max-w-7xl mx-auto px-4 py-4">
         {/* Schedule Header */}
         <div className="mb-4">
           <div className="flex items-start justify-between">
             <div>
-              <h1 className="text-xl font-bold text-gray-900">
+              <h1 className="text-xl font-bold text-gray-900 dark:text-slate-100">
                 {schedule.title}
               </h1>
               {schedule.description && (
-                <p className="text-sm text-gray-500 mt-1">
+                <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
                   {schedule.description}
                 </p>
               )}
@@ -415,25 +415,25 @@ export function ScheduleView() {
                 <span
                   className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                     schedule.type === "one-off"
-                      ? "bg-green-100 text-green-700"
-                      : "bg-purple-100 text-purple-700"
+                      ? "bg-green-100 text-green-700 dark:bg-emerald-900/40 dark:text-emerald-400"
+                      : "bg-purple-100 text-purple-700 dark:bg-violet-900/40 dark:text-violet-400"
                   }`}
                 >
                   {schedule.type === "one-off" ? "One-off" : "Recurring"}
                 </span>
-                <span className="text-xs text-gray-400">
+                <span className="text-xs text-gray-400 dark:text-slate-500">
                   by {schedule.creatorName}
                 </span>
               </div>
             </div>
             <div className="flex flex-col items-end gap-2 shrink-0">
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-400 dark:text-slate-500">
                 My timezone: {timezone}
               </span>
               {isCreator && (
                 <button
                   onClick={() => setShowEditModal(true)}
-                  className="text-xs px-3 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400 transition-colors"
+                  className="text-xs px-3 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400 transition-colors dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:border-slate-500"
                 >
                   Edit Schedule
                 </button>
@@ -444,12 +444,12 @@ export function ScheduleView() {
 
         {/* Non-current week banner for recurring schedules */}
         {schedule.type === "recurring" && weekOffset !== 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
-            <p className="text-sm text-amber-800">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 dark:bg-amber-900/30 dark:border-amber-700">
+            <p className="text-sm text-amber-800 dark:text-amber-300">
               Nomination changes made on non-current weeks are one-off exceptions.{" "}
               <button
                 onClick={() => setWeekOffset(0)}
-                className="text-amber-900 font-medium underline hover:text-amber-700"
+                className="text-amber-900 font-medium underline hover:text-amber-700 dark:text-amber-200 dark:hover:text-amber-100"
               >
                 Click 'Today'
               </button>{" "}
@@ -470,12 +470,12 @@ export function ScheduleView() {
         <div className="flex items-center gap-4 mb-3 flex-wrap">
           {/* Apply mode / Select mode */}
           <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-gray-600">Apply:</label>
+            <label className="text-xs font-medium text-gray-600 dark:text-slate-400">Apply:</label>
             {isCreator && creatorMode === "limit" ? (
               <select
                 value={allowMode}
                 onChange={(e) => setAllowMode(e.target.value as AllowMode)}
-                className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-green-500"
+                className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
               >
                 <option value="auto">Auto</option>
                 <option value="allow">Allow</option>
@@ -485,7 +485,7 @@ export function ScheduleView() {
               <select
                 value={selectMode}
                 onChange={(e) => setSelectMode(e.target.value as SelectMode)}
-                className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
               >
                 <option value="auto">Auto</option>
                 <option value="can-do">Can Do</option>
@@ -496,7 +496,7 @@ export function ScheduleView() {
           </div>
 
           {/* Legend */}
-          <div className="flex items-center gap-3 text-xs">
+          <div className="flex items-center gap-3 text-xs dark:text-slate-300">
             <span className="flex items-center gap-1">
               <span className="w-3 h-3 rounded bg-can-do-bg border border-can-do inline-block"></span>
               Can Do
@@ -518,8 +518,8 @@ export function ScheduleView() {
                 onClick={() => setCreatorMode("limit")}
                 className={`text-xs px-2 py-1 rounded ${
                   creatorMode === "limit"
-                    ? "bg-green-100 text-green-700 font-medium"
-                    : "text-gray-500 hover:bg-gray-100"
+                    ? "bg-green-100 text-green-700 font-medium dark:bg-emerald-900/40 dark:text-emerald-400"
+                    : "text-gray-500 hover:bg-gray-100 dark:text-slate-400 dark:hover:bg-slate-700"
                 }`}
               >
                 Allow/Disallow Time
@@ -528,8 +528,8 @@ export function ScheduleView() {
                 onClick={() => setCreatorMode("nominate")}
                 className={`text-xs px-2 py-1 rounded ${
                   creatorMode === "nominate"
-                    ? "bg-blue-100 text-blue-700 font-medium"
-                    : "text-gray-500 hover:bg-gray-100"
+                    ? "bg-blue-100 text-blue-700 font-medium dark:bg-cyan-900/40 dark:text-cyan-400"
+                    : "text-gray-500 hover:bg-gray-100 dark:text-slate-400 dark:hover:bg-slate-700"
                 }`}
               >
                 Nominate Time
@@ -538,8 +538,8 @@ export function ScheduleView() {
                 onClick={() => setCreatorMode("lock")}
                 className={`text-xs px-2 py-1 rounded ${
                   creatorMode === "lock"
-                    ? "bg-purple-100 text-purple-700 font-medium"
-                    : "text-gray-500 hover:bg-gray-100"
+                    ? "bg-purple-100 text-purple-700 font-medium dark:bg-violet-900/40 dark:text-violet-400"
+                    : "text-gray-500 hover:bg-gray-100 dark:text-slate-400 dark:hover:bg-slate-700"
                 }`}
               >
                 Lock In Time
@@ -568,7 +568,7 @@ export function ScheduleView() {
           {canInteract && (
             <button
               onClick={() => setShowClearModal(true)}
-              className="text-xs px-2 py-1 rounded text-red-600 hover:bg-red-50 border border-red-200 hover:border-red-300 transition-colors"
+              className="text-xs px-2 py-1 rounded text-red-600 hover:bg-red-50 border border-red-200 hover:border-red-300 transition-colors dark:text-rose-400 dark:hover:bg-rose-900/40 dark:border-rose-800 dark:hover:border-red-700"
             >
               Clear
             </button>
@@ -579,12 +579,12 @@ export function ScheduleView() {
             <button
               onClick={handleWeekBack}
               disabled={!canGoBack()}
-              className="text-gray-500 hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed px-2 py-1 rounded hover:bg-gray-100 text-sm"
+              className="text-gray-500 hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed px-2 py-1 rounded hover:bg-gray-100 text-sm dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-700"
               title="Previous week"
             >
               &larr;
             </button>
-            <span className="text-xs text-gray-500 min-w-[120px] text-center">
+            <span className="text-xs text-gray-500 dark:text-slate-400 min-w-[120px] text-center">
               {(() => {
                 const weekDates = getWeekDates(referenceDate, weekStartDay);
                 return `${weekDates[0].toFormat("MMM d")} – ${weekDates[6].toFormat("MMM d, yyyy")}`;
@@ -593,7 +593,7 @@ export function ScheduleView() {
             <button
               onClick={handleWeekForward}
               disabled={!canGoForward()}
-              className="text-gray-500 hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed px-2 py-1 rounded hover:bg-gray-100 text-sm"
+              className="text-gray-500 hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed px-2 py-1 rounded hover:bg-gray-100 text-sm dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-700"
               title="Next week"
             >
               &rarr;
@@ -601,7 +601,7 @@ export function ScheduleView() {
             {weekOffset !== 0 && (
               <button
                 onClick={() => setWeekOffset(0)}
-                className="text-xs text-blue-600 hover:text-blue-700"
+                className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
               >
                 Today
               </button>

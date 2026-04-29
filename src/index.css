@@ -13,6 +13,17 @@
   --color-limit: #22c55e;
 }
 
+/* Dark mode theme overrides — slate base, emerald/rose/amber cells, cyan accents */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-can-do-bg: #059669;   /* emerald-600 */
+    --color-cant-do-bg: #e11d48;  /* rose-600 */
+    --color-maybe-bg: #d97706;    /* amber-600 */
+    --color-locked-bg: #7c3aed;   /* violet-600 */
+    color-scheme: dark;
+  }
+}
+
 /* Compact grid styles */
 .grid-cell {
   @apply border border-gray-200 relative select-none;
@@ -25,13 +36,13 @@
 }
 
 .grid-cell.state-can-do {
-  @apply bg-can-do-bg;
+  background-color: var(--color-can-do-bg);
 }
 .grid-cell.state-cant-do {
-  @apply bg-cant-do-bg;
+  background-color: var(--color-cant-do-bg);
 }
 .grid-cell.state-maybe {
-  @apply bg-maybe-bg;
+  background-color: var(--color-maybe-bg);
 }
 
 /* Disallowed cell styling */
@@ -186,4 +197,91 @@
 
 .profile-icon {
   @apply w-4 h-4 rounded-full text-[8px] flex items-center justify-center font-bold text-white;
+}
+
+/* ==================== Dark Mode (slate + jewel tones) ==================== */
+@media (prefers-color-scheme: dark) {
+  /* Grid cells — slate borders */
+  .grid-cell {
+    border-color: #334155; /* slate-700 */
+  }
+  .grid-cell:hover {
+    border-color: #64748b; /* slate-500 */
+  }
+
+  /* Disallowed cells — recessed slate */
+  .grid-cell.disallowed {
+    background-color: #0f172a; /* slate-900 */
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 3px,
+      rgba(100, 116, 139, 0.18) 3px,
+      rgba(100, 116, 139, 0.18) 6px
+    );
+  }
+
+  .grid-cell.disallowed.state-can-do {
+    background-color: #0c2e22;
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 3px,
+      rgba(100, 116, 139, 0.14) 3px,
+      rgba(100, 116, 139, 0.14) 6px
+    );
+  }
+  .grid-cell.disallowed.state-cant-do {
+    background-color: #2a0f1a;
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 3px,
+      rgba(100, 116, 139, 0.14) 3px,
+      rgba(100, 116, 139, 0.14) 6px
+    );
+  }
+  .grid-cell.disallowed.state-maybe {
+    background-color: #2a1f0c;
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 3px,
+      rgba(100, 116, 139, 0.14) 3px,
+      rgba(100, 116, 139, 0.14) 6px
+    );
+  }
+
+  /* Current day column — cyan accent */
+  .current-day-header {
+    border-left-color: #22d3ee; /* cyan-400 */
+    border-right-color: #22d3ee;
+    border-top-color: #22d3ee;
+  }
+  .grid-cell.current-day-col {
+    border-left-color: #22d3ee;
+    border-right-color: #22d3ee;
+  }
+  .grid-cell.current-day-col-last {
+    border-bottom-color: #22d3ee;
+  }
+
+  /* Scrollbar — slate tones */
+  .grid-container::-webkit-scrollbar-thumb {
+    background-color: #475569; /* slate-600 */
+  }
+  .grid-container::-webkit-scrollbar-track {
+    background-color: #0f172a; /* slate-900 */
+  }
+
+  /* Muted profile groups in disallowed cells */
+  .grid-cell.disallowed .profile-group.can-do {
+    background-color: rgba(5, 150, 105, 0.2);
+  }
+  .grid-cell.disallowed .profile-group.cant-do {
+    background-color: rgba(225, 29, 72, 0.2);
+  }
+  .grid-cell.disallowed .profile-group.maybe {
+    background-color: rgba(217, 119, 6, 0.2);
+  }
 }

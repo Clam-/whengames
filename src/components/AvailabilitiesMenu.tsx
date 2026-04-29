@@ -70,27 +70,27 @@ export function AvailabilitiesMenu({
 
   if (isNonCurrentWeek) {
     buttonClass +=
-      "bg-gray-200 text-gray-500 border-gray-300 cursor-default";
+      "bg-gray-200 text-gray-500 border-gray-300 cursor-default dark:bg-slate-700 dark:text-slate-400 dark:border-slate-600";
     buttonTitle =
       "Making one-off nominations to a reoccurring schedule are not saved to your saved availability.";
     buttonLabel = isLinked ? currentLink.savedAvailabilityName : "Availabilities";
   } else if (isLinked) {
     buttonClass +=
-      "bg-red-100 text-red-700 border-red-300 hover:bg-red-200";
+      "bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-200 dark:bg-indigo-900/50 dark:text-indigo-300 dark:border-indigo-600 dark:hover:bg-indigo-800/50";
     buttonLabel = currentLink.savedAvailabilityName;
     buttonTitle = `Current availability is linked to ${currentLink.savedAvailabilityName}. Any changes made will be automatically applied to your saved availability.`;
   } else {
     buttonClass +=
-      "bg-white text-gray-600 border-gray-300 hover:bg-gray-50";
+      "bg-white text-gray-600 border-gray-300 hover:bg-gray-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600 dark:hover:bg-slate-700";
   }
 
   // Menu item helpers
   const menuItemBase =
     "block w-full text-left px-3 py-2 text-xs transition-colors ";
   const menuItemEnabled =
-    menuItemBase + "text-gray-700 hover:bg-gray-100 cursor-pointer";
+    menuItemBase + "text-gray-700 hover:bg-gray-100 cursor-pointer dark:text-slate-300 dark:hover:bg-slate-700";
   const menuItemDisabled =
-    menuItemBase + "text-gray-400 cursor-not-allowed";
+    menuItemBase + "text-gray-400 cursor-not-allowed dark:text-slate-500";
 
   // Determine disabled states and hover text for each option
   const applyDisabled = hasNoSavedAvailabilities;
@@ -152,7 +152,7 @@ export function AvailabilitiesMenu({
       </button>
 
       {isOpen && !isNonCurrentWeek && (
-        <div className="absolute left-0 top-full mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+        <div className="absolute left-0 top-full mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 dark:bg-slate-800 dark:border-slate-700">
           {/* Apply */}
           <button
             onClick={handleApplyClick}
@@ -163,7 +163,7 @@ export function AvailabilitiesMenu({
             Apply saved availability...
           </button>
 
-          <div className="border-t border-gray-100" />
+          <div className="border-t border-gray-100 dark:border-slate-700" />
 
           {/* Save/overwrite default */}
           <button
@@ -195,7 +195,7 @@ export function AvailabilitiesMenu({
             Save and link new availability...
           </button>
 
-          <div className="border-t border-gray-100" />
+          <div className="border-t border-gray-100 dark:border-slate-700" />
 
           {/* Unlink */}
           <button
@@ -215,13 +215,13 @@ export function AvailabilitiesMenu({
           {/* Manage link */}
           {savedAvailabilities.length > 0 && (
             <>
-              <div className="border-t border-gray-100" />
+              <div className="border-t border-gray-100 dark:border-slate-700" />
               <button
                 onClick={() => {
                   onManage();
                   setIsOpen(false);
                 }}
-                className={menuItemEnabled + " text-blue-600 hover:text-blue-700"}
+                className={menuItemEnabled + " text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"}
               >
                 Manage saved availabilities
               </button>

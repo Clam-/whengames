@@ -86,16 +86,16 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6 relative"
+        className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6 relative dark:bg-slate-800"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">
             Edit Schedule
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+            className="text-gray-400 hover:text-gray-600 text-xl leading-none dark:hover:text-slate-300"
           >
             &times;
           </button>
@@ -103,7 +103,7 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
               Title
             </label>
             <input
@@ -111,27 +111,27 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g., Friday Game Night"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-400"
               required
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
               Description{" "}
-              <span className="text-gray-400 font-normal">(optional)</span>
+              <span className="text-gray-400 font-normal dark:text-slate-500">(optional)</span>
             </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What's this schedule for?"
               rows={2}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-400"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
               Type
             </label>
             <div className="flex gap-3">
@@ -147,7 +147,7 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
                   disabled={isRecurringOriginal}
                   className="text-blue-600"
                 />
-                <span className="text-sm">One-off</span>
+                <span className="text-sm dark:text-slate-300">One-off</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -158,11 +158,11 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
                   onChange={() => setType("recurring")}
                   className="text-blue-600"
                 />
-                <span className="text-sm">Recurring (weekly)</span>
+                <span className="text-sm dark:text-slate-300">Recurring (weekly)</span>
               </label>
             </div>
             {isRecurringOriginal && (
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-xs text-gray-400 mt-1 dark:text-slate-500">
                 Recurring schedules cannot be changed to one-off.
               </p>
             )}
@@ -170,11 +170,11 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
 
           {/* Type change warning */}
           {isTypeChanged && !isRecurringOriginal && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-              <p className="text-sm text-amber-800 font-medium mb-1">
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 dark:bg-amber-900/30 dark:border-amber-700">
+              <p className="text-sm text-amber-800 font-medium mb-1 dark:text-amber-300">
                 Converting to recurring will:
               </p>
-              <ul className="text-xs text-amber-700 list-disc list-inside space-y-0.5">
+              <ul className="text-xs text-amber-700 list-disc list-inside space-y-0.5 dark:text-amber-400">
                 <li>
                   Convert all nominations from date-specific to weekly
                   day-of-week (e.g. &ldquo;April 24&rdquo; becomes
@@ -189,7 +189,7 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
                 </li>
                 <li>Remove the date range restriction</li>
               </ul>
-              <p className="text-xs text-amber-600 mt-2">
+              <p className="text-xs text-amber-600 mt-2 dark:text-amber-500">
                 This cannot be undone, but all existing data will be preserved
                 in the new recurring format.
               </p>
@@ -199,19 +199,19 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
           {type === "one-off" && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
                   Start Date
                 </label>
                 <input
                   type="date"
                   value={dateStart}
                   onChange={(e) => setDateStart(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
                   required
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
                   End Date
                 </label>
                 <input
@@ -219,7 +219,7 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
                   value={dateEnd}
                   onChange={(e) => setDateEnd(e.target.value)}
                   min={dateStart}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
                   required
                 />
               </div>
@@ -228,15 +228,15 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
 
           {type === "recurring" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
                 Start Date{" "}
-                <span className="text-gray-400 font-normal">(optional)</span>
+                <span className="text-gray-400 font-normal dark:text-slate-500">(optional)</span>
               </label>
               <input
                 type="date"
                 value={recurringStartDate}
                 onChange={(e) => setRecurringStartDate(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
               />
             </div>
           )}
@@ -252,13 +252,13 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
               />
               <label
                 htmlFor="edit-is-private"
-                className="text-sm text-gray-700"
+                className="text-sm text-gray-700 dark:text-slate-300"
               >
                 Private schedule
               </label>
             </div>
             {isPrivate && (
-              <p className="text-xs text-gray-500 mt-1 ml-6">
+              <p className="text-xs text-gray-500 mt-1 ml-6 dark:text-slate-400">
                 Private schedules can still be viewed by anyone with the link to
                 this schedule.
               </p>
@@ -266,18 +266,18 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
           </div>
 
           {/* Delete section */}
-          <div className="border-t pt-4">
+          <div className="border-t pt-4 dark:border-slate-700">
             {!showDeleteConfirm ? (
               <button
                 type="button"
                 onClick={() => setShowDeleteConfirm(true)}
-                className="text-xs px-3 py-1.5 rounded text-red-600 hover:bg-red-50 border border-red-200 hover:border-red-300 transition-colors"
+                className="text-xs px-3 py-1.5 rounded text-red-600 hover:bg-red-50 border border-red-200 hover:border-red-300 transition-colors dark:text-rose-400 dark:hover:bg-rose-900/40 dark:border-rose-800 dark:hover:border-red-700"
               >
                 Delete Schedule
               </button>
             ) : (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                <p className="text-sm text-red-700 mb-3">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 dark:bg-rose-900/40 dark:border-rose-800">
+                <p className="text-sm text-red-700 mb-3 dark:text-rose-400">
                   Are you sure? This will permanently delete &ldquo;
                   {schedule.title}&rdquo; and all nominations, settings, and
                   linked availabilities. This cannot be undone.
@@ -286,7 +286,7 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
                   <button
                     type="button"
                     onClick={() => setShowDeleteConfirm(false)}
-                    className="flex-1 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                    className="flex-1 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded transition-colors dark:text-slate-400 dark:hover:bg-slate-700"
                     disabled={isSubmitting}
                   >
                     Cancel
@@ -309,7 +309,7 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 dark:text-slate-400 dark:hover:text-slate-200"
             >
               Cancel
             </button>

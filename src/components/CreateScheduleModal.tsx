@@ -76,12 +76,12 @@ export function CreateScheduleModal({ onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6 dark:bg-slate-800">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Create Schedule</h2>
+          <h2 className="text-lg font-semibold dark:text-slate-100">Create Schedule</h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+            className="text-gray-400 hover:text-gray-600 text-xl leading-none dark:hover:text-slate-300"
           >
             &times;
           </button>
@@ -91,7 +91,7 @@ export function CreateScheduleModal({ onClose }: Props) {
           {/* Display name for anonymous users */}
           {!profile && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
                 Your Display Name
               </label>
               <input
@@ -99,14 +99,14 @@ export function CreateScheduleModal({ onClose }: Props) {
                 value={creatorName}
                 onChange={(e) => setCreatorName(e.target.value)}
                 placeholder="Enter your name"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-400"
                 required
               />
             </div>
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
               Title
             </label>
             <input
@@ -114,27 +114,27 @@ export function CreateScheduleModal({ onClose }: Props) {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g., Friday Game Night"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-400"
               required
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
               Description{" "}
-              <span className="text-gray-400 font-normal">(optional)</span>
+              <span className="text-gray-400 font-normal dark:text-slate-500">(optional)</span>
             </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What's this schedule for?"
               rows={2}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-400"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
               Type
             </label>
             <div className="flex gap-3">
@@ -147,7 +147,7 @@ export function CreateScheduleModal({ onClose }: Props) {
                   onChange={() => setType("one-off")}
                   className="text-blue-600"
                 />
-                <span className="text-sm">One-off</span>
+                <span className="text-sm dark:text-slate-300">One-off</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -158,7 +158,7 @@ export function CreateScheduleModal({ onClose }: Props) {
                   onChange={() => setType("recurring")}
                   className="text-blue-600"
                 />
-                <span className="text-sm">Recurring (weekly)</span>
+                <span className="text-sm dark:text-slate-300">Recurring (weekly)</span>
               </label>
             </div>
           </div>
@@ -166,19 +166,19 @@ export function CreateScheduleModal({ onClose }: Props) {
           {type === "one-off" && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
                   Start Date
                 </label>
                 <input
                   type="date"
                   value={dateStart}
                   onChange={(e) => setDateStart(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
                   required
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
                   End Date
                 </label>
                 <input
@@ -186,7 +186,7 @@ export function CreateScheduleModal({ onClose }: Props) {
                   value={dateEnd}
                   onChange={(e) => setDateEnd(e.target.value)}
                   min={dateStart}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
                   required
                 />
               </div>
@@ -195,15 +195,15 @@ export function CreateScheduleModal({ onClose }: Props) {
 
           {type === "recurring" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-slate-300">
                 Start Date{" "}
-                <span className="text-gray-400 font-normal">(optional)</span>
+                <span className="text-gray-400 font-normal dark:text-slate-500">(optional)</span>
               </label>
               <input
                 type="date"
                 value={recurringStartDate}
                 onChange={(e) => setRecurringStartDate(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
               />
             </div>
           )}
@@ -217,18 +217,18 @@ export function CreateScheduleModal({ onClose }: Props) {
                 onChange={(e) => setIsPrivate(e.target.checked)}
                 className="rounded text-blue-600"
               />
-              <label htmlFor="is-private" className="text-sm text-gray-700">
+              <label htmlFor="is-private" className="text-sm text-gray-700 dark:text-slate-300">
                 Private schedule
               </label>
             </div>
             {isPrivate && (
-              <p className="text-xs text-gray-500 mt-1 ml-6">
+              <p className="text-xs text-gray-500 mt-1 ml-6 dark:text-slate-400">
                 Private schedules can still be viewed by anyone with the link to this schedule.
               </p>
             )}
           </div>
 
-          <div className="text-xs text-gray-400">
+          <div className="text-xs text-gray-400 dark:text-slate-500">
             My timezone: {timezone}. Others will see schedules in their own timezone.
           </div>
 
@@ -236,7 +236,7 @@ export function CreateScheduleModal({ onClose }: Props) {
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 dark:text-slate-400 dark:hover:text-slate-200"
             >
               Cancel
             </button>

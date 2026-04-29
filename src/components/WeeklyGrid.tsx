@@ -757,7 +757,7 @@ export function WeeklyGrid({
       if (isCreator && creatorMode === "limit") return "drag-select-limit";
       if (isCreator && creatorMode === "lock") return "drag-select-lock";
       // nominate mode or non-creator
-      return "bg-blue-100";
+      return "bg-blue-100 dark:bg-cyan-900/40";
     },
     [isCellInDragSelection, isCreator, creatorMode]
   );
@@ -820,7 +820,7 @@ export function WeeklyGrid({
     <div className="relative">
       {/* DST Notice */}
       {dstNotice && (
-        <div className="bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3 text-xs text-amber-800">
+        <div className="bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3 text-xs text-amber-800 dark:bg-amber-900/30 dark:border-amber-700 dark:text-amber-300">
           {dstNotice}
         </div>
       )}
@@ -828,13 +828,13 @@ export function WeeklyGrid({
       {/* Grid Container */}
       <div
         ref={gridRef}
-        className={`grid-container overflow-auto border border-gray-300 rounded-lg bg-white ${!canInteract ? "no-interact" : ""}`}
+        className={`grid-container overflow-auto border border-gray-300 rounded-lg bg-white dark:border-slate-600 dark:bg-slate-800 ${!canInteract ? "no-interact" : ""}`}
         style={{ maxHeight: "calc(100vh - 260px)" }}
       >
         <table className="border-collapse w-full" style={{ minWidth: 640 }}>
-          <thead className="sticky top-0 z-10 bg-white">
+          <thead className="sticky top-0 z-10 bg-white dark:bg-slate-800">
             <tr>
-              <th className="border border-gray-200 px-1 py-1 text-xs text-gray-500 font-medium w-16 bg-gray-50 sticky left-0 z-20">
+              <th className="border border-gray-200 px-1 py-1 text-xs text-gray-500 font-medium w-16 bg-gray-50 sticky left-0 z-20 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
                 Time
               </th>
               {dayNames.map((day, i) => {
@@ -845,14 +845,14 @@ export function WeeklyGrid({
                 return (
                   <th
                     key={i}
-                    className={`border border-gray-200 px-1 py-1 text-xs font-medium min-w-[80px] ${
+                    className={`border border-gray-200 px-1 py-1 text-xs font-medium min-w-[80px] dark:border-slate-700 ${
                       isToday
-                        ? "bg-blue-50 text-blue-700 current-day-header"
-                        : "bg-gray-50 text-gray-600"
+                        ? "bg-blue-50 text-blue-700 current-day-header dark:bg-cyan-900/30 dark:text-cyan-400"
+                        : "bg-gray-50 text-gray-600 dark:bg-slate-800 dark:text-slate-400"
                     } ${!inRange ? "opacity-40" : ""}`}
                   >
                     <div>{day}</div>
-                    <div className="text-[10px] font-normal text-gray-400">
+                    <div className="text-[10px] font-normal text-gray-400 dark:text-slate-500">
                       {columnDates[i]}
                     </div>
                   </th>
@@ -863,7 +863,7 @@ export function WeeklyGrid({
           <tbody>
             {TIME_SLOTS.map((slot, timeIndex) => (
               <tr key={slot}>
-                <td className="border border-gray-200 px-1 py-0 text-[10px] text-gray-400 font-mono whitespace-nowrap bg-gray-50 sticky left-0 z-10">
+                <td className="border border-gray-200 px-1 py-0 text-[10px] text-gray-400 font-mono whitespace-nowrap bg-gray-50 sticky left-0 z-10 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500">
                   {timeIndex % 2 === 0 ? formatTimeSlot(slot) : ""}
                 </td>
                 {dayNames.map((_, dayIndex) => {

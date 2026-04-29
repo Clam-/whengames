@@ -44,22 +44,22 @@ export function ApplyAvailabilityModal({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-6"
+        className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-6 dark:bg-slate-800"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">
             Apply Saved Availability
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+            className="text-gray-400 hover:text-gray-600 text-xl leading-none dark:hover:text-slate-300"
           >
             &times;
           </button>
         </div>
 
-        <p className="text-sm text-gray-600 mb-4">
+        <p className="text-sm text-gray-600 dark:text-slate-400 mb-4">
           Choose which saved availability to apply to this schedule. Your
           current nominations will be replaced.
         </p>
@@ -69,7 +69,7 @@ export function ApplyAvailabilityModal({
           onChange={(e) =>
             setSelectedId(e.target.value as Id<"savedAvailabilities">)
           }
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
         >
           {savedAvailabilities.map((sa) => (
             <option key={sa._id} value={sa._id}>
@@ -85,7 +85,7 @@ export function ApplyAvailabilityModal({
               onClose();
               onManage();
             }}
-            className="text-xs text-blue-600 hover:text-blue-700 underline"
+            className="text-xs text-blue-600 hover:text-blue-700 underline dark:text-blue-400 dark:hover:text-blue-300"
           >
             Manage saved availabilities
           </button>
@@ -93,7 +93,7 @@ export function ApplyAvailabilityModal({
           <div className="flex gap-3">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 dark:text-slate-400 dark:hover:text-slate-200"
             >
               Cancel
             </button>

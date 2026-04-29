@@ -29,22 +29,22 @@ export function SaveAvailabilityModal({ onSave, onClose }: Props) {
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-6"
+        className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-6 dark:bg-slate-800"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">
             Save New Availability
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+            className="text-gray-400 hover:text-gray-600 text-xl leading-none dark:hover:text-slate-300"
           >
             &times;
           </button>
         </div>
 
-        <p className="text-sm text-gray-600 mb-4">
+        <p className="text-sm text-gray-600 dark:text-slate-400 mb-4">
           Give your saved availability a name. Your current nominations will be
           saved and linked to this schedule.
         </p>
@@ -54,7 +54,7 @@ export function SaveAvailabilityModal({ onSave, onClose }: Props) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Weekday evenings, Weekend mornings..."
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-400"
           autoFocus
           onKeyDown={(e) => {
             if (e.key === "Enter") handleSave();
@@ -64,7 +64,7 @@ export function SaveAvailabilityModal({ onSave, onClose }: Props) {
         <div className="flex justify-end gap-3">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+            className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 dark:text-slate-400 dark:hover:text-slate-200"
           >
             Cancel
           </button>

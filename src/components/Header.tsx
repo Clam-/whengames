@@ -31,17 +31,17 @@ export function Header() {
 
   return (
     <>
-      <header className="bg-white border-b border-gray-200 shadow-sm">
+      <header className="bg-white border-b border-gray-200 shadow-sm dark:bg-slate-800 dark:border-slate-700">
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
           <a href="/" className="flex items-center gap-2 no-underline">
-            <span className="text-xl font-bold text-gray-900">
+            <span className="text-xl font-bold text-gray-900 dark:text-slate-100">
               When games?
             </span>
           </a>
 
           <div className="flex items-center gap-3">
             {isLoading ? (
-              <span className="text-sm text-gray-400">Loading...</span>
+              <span className="text-sm text-gray-400 dark:text-slate-500">Loading...</span>
             ) : isAuthenticated || profile?.isAuthenticated ? (
               <>
                 <div className="flex items-center gap-2">
@@ -52,7 +52,7 @@ export function Header() {
                       className="w-7 h-7 rounded-full"
                     />
                   )}
-                  <span className="text-sm text-gray-700">
+                  <span className="text-sm text-gray-700 dark:text-slate-300">
                     {profile?.displayName ||
                       profile?.ssoName ||
                       profile?.ssoEmail ||
@@ -61,13 +61,13 @@ export function Header() {
                 </div>
                 <button
                   onClick={() => setShowSettings(true)}
-                  className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100"
+                  className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-700"
                 >
                   Settings
                 </button>
                 <button
                   onClick={handleLogout}
-                  className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100"
+                  className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-700"
                 >
                   Logout
                 </button>
@@ -75,7 +75,7 @@ export function Header() {
             ) : (
               <>
                 {hasInteracted && profile && (
-                  <span className="text-sm text-gray-500">
+                  <span className="text-sm text-gray-500 dark:text-slate-400">
                     {profile.displayName}
                   </span>
                 )}
@@ -88,7 +88,7 @@ export function Header() {
                 {profile && (
                   <button
                     onClick={() => setShowSettings(true)}
-                    className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100"
+                    className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-700"
                   >
                     Settings
                   </button>
@@ -99,7 +99,7 @@ export function Header() {
                       clearAnonymousUser();
                       window.location.reload();
                     }}
-                    className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100"
+                    className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-700"
                   >
                     Logout
                   </button>
