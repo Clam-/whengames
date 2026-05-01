@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { auth } from "./auth";
 import { Doc, Id } from "./_generated/dataModel";
 
@@ -68,13 +69,18 @@ export const currentUserProfile = query({
         .withIndex("by_authUserId", (q) => q.eq("authUserId", userId))
         .unique();
       if (profile) {
+        // Prefer Convex-stored image over hotlinked Google URL
+        const storedImageUrl = profile.profileImageStorageId
+          ? await ctx.storage.getUrl(profile.profileImageStorageId)
+          : null;
+        const resolvedImage = storedImageUrl ?? authUser?.image;
         return {
           ...profile,
           isAuthenticated: true as const,
           authType: "sso" as const,
           ssoName: authUser?.name,
           ssoEmail: authUser?.email,
-          ssoImage: authUser?.image,
+          ssoImage: resolvedImage,
         };
       }
 
@@ -88,13 +94,17 @@ export const currentUserProfile = query({
           )
           .unique();
         if (anonProfile) {
+          const storedImageUrl = anonProfile.profileImageStorageId
+            ? await ctx.storage.getUrl(anonProfile.profileImageStorageId)
+            : null;
+          const resolvedImage = storedImageUrl ?? authUser?.image;
           return {
             ...anonProfile,
             isAuthenticated: true as const,
             authType: "sso" as const,
             ssoName: authUser?.name,
             ssoEmail: authUser?.email,
-            ssoImage: authUser?.image,
+            ssoImage: resolvedImage,
           };
         }
       }
@@ -251,6 +261,15 @@ export const mergeAnonymousToAuth = mutation({
       // Delete anonymous profile
       await ctx.db.delete(anonProfile._id);
 
+      // Schedule background download of Google profile image into Convex storage
+      if (profileImageUrl) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.profileImages.downloadAndStoreProfileImage,
+          { profileId: existingAuthProfile._id, imageUrl: profileImageUrl }
+        );
+      }
+
       return existingAuthProfile._id;
     } else if (anonProfile) {
       // Only anon exists - upgrade it to authenticated
@@ -260,10 +279,19 @@ export const mergeAnonymousToAuth = mutation({
         profileImageUrl,
         displayName: anonProfile.displayName || displayName || "User",
       });
+
+      // Schedule background download of Google profile image into Convex storage
+      if (profileImageUrl) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.profileImages.downloadAndStoreProfileImage,
+          { profileId: anonProfile._id, imageUrl: profileImageUrl }
+        );
+      }
       return anonProfile._id;
     } else {
       // No anon profile - create new auth profile
-      return await ctx.db.insert("userProfiles", {
+      const newProfileId = await ctx.db.insert("userProfiles", {
         authUserId: userId,
         displayName: displayName || "User",
         email,
@@ -272,6 +300,16 @@ export const mergeAnonymousToAuth = mutation({
         weekStartDay: 0,
         dstNotifications: true,
       });
+
+      // Schedule background download of Google profile image into Convex storage
+      if (profileImageUrl) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.profileImages.downloadAndStoreProfileImage,
+          { profileId: newProfileId, imageUrl: profileImageUrl }
+        );
+      }
+      return newProfileId;
     }
   },
 });
@@ -363,6 +401,15 @@ export const ensureAuthProfile = mutation({
       }
 
       await ctx.db.delete(anonProfile._id);
+
+      // Schedule background download of Google profile image into Convex storage
+      if (profileImageUrl) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.profileImages.downloadAndStoreProfileImage,
+          { profileId: authProfile._id, imageUrl: profileImageUrl }
+        );
+      }
       return authProfile._id;
     } else if (anonProfile && !authProfile) {
       // Upgrade anon to auth
@@ -371,6 +418,15 @@ export const ensureAuthProfile = mutation({
         email,
         profileImageUrl,
       });
+
+      // Schedule background download of Google profile image into Convex storage
+      if (profileImageUrl) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.profileImages.downloadAndStoreProfileImage,
+          { profileId: anonProfile._id, imageUrl: profileImageUrl }
+        );
+      }
       return anonProfile._id;
     } else if (authProfile) {
       // Already have auth profile, update email/image
@@ -378,10 +434,19 @@ export const ensureAuthProfile = mutation({
         email: email ?? authProfile.email,
         profileImageUrl: profileImageUrl ?? authProfile.profileImageUrl,
       });
+
+      // Always re-download on sign-in to pick up any profile picture changes
+      if (profileImageUrl) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.profileImages.downloadAndStoreProfileImage,
+          { profileId: authProfile._id, imageUrl: profileImageUrl }
+        );
+      }
       return authProfile._id;
     } else {
       // Create new
-      return await ctx.db.insert("userProfiles", {
+      const newProfileId = await ctx.db.insert("userProfiles", {
         authUserId: userId,
         displayName: displayName || "User",
         email,
@@ -390,6 +455,16 @@ export const ensureAuthProfile = mutation({
         weekStartDay: 0,
         dstNotifications: true,
       });
+
+      // Schedule background download of Google profile image into Convex storage
+      if (profileImageUrl) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.profileImages.downloadAndStoreProfileImage,
+          { profileId: newProfileId, imageUrl: profileImageUrl }
+        );
+      }
+      return newProfileId;
     }
   },
 });
@@ -411,11 +486,17 @@ export const unlinkSso = mutation({
     );
     const ssoName = authUser?.name;
 
+    // Clean up stored profile image from Convex storage
+    if (profile.profileImageStorageId) {
+      await ctx.storage.delete(profile.profileImageStorageId);
+    }
+
     const updates: Record<string, unknown> = {
       authUserId: undefined,
       anonymousId: args.newAnonymousId,
       email: undefined,
       profileImageUrl: undefined,
+      profileImageStorageId: undefined,
     };
 
     // If display name was cleared (to use SSO name), restore the SSO name
@@ -426,6 +507,53 @@ export const unlinkSso = mutation({
     await ctx.db.patch(args.profileId, updates);
 
     return { displayName: (updates.displayName as string) || profile.displayName };
+  },
+});
+
+// Refresh the authenticated user's cached profile image if stale (>24 hours).
+// Called by the frontend on each app access; the backend throttles to avoid
+// redundant downloads. This catches profile-picture changes between sign-ins.
+const PROFILE_IMAGE_REFRESH_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+
+export const refreshProfileImageIfNeeded = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await auth.getUserId(ctx);
+    if (!userId) return;
+
+    const profile = await ctx.db
+      .query("userProfiles")
+      .withIndex("by_authUserId", (q) => q.eq("authUserId", userId))
+      .unique();
+    if (!profile) return;
+
+    // Throttle: skip if checked recently
+    const now = Date.now();
+    if (
+      profile.profileImageLastCheckedAt &&
+      now - profile.profileImageLastCheckedAt < PROFILE_IMAGE_REFRESH_INTERVAL
+    ) {
+      return;
+    }
+
+    // Fetch the latest Google image URL from the auth users table.
+    // This may differ from profileImageUrl if the user re-authenticated
+    // and Google returned a new URL.
+    const authUser = await ctx.db.get(userId);
+    const imageUrl = authUser?.image ?? profile.profileImageUrl;
+    if (!imageUrl) return;
+
+    // Stamp the throttle first so concurrent calls don't duplicate
+    await ctx.db.patch(profile._id, {
+      profileImageLastCheckedAt: now,
+    });
+
+    // Schedule the download
+    await ctx.scheduler.runAfter(
+      0,
+      internal.profileImages.downloadAndStoreProfileImage,
+      { profileId: profile._id, imageUrl }
+    );
   },
 });
 

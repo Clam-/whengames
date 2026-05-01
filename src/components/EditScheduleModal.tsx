@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useNavigate } from "react-router";
@@ -24,6 +24,12 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
   const navigate = useNavigate();
   const updateSchedule = useMutation(api.schedules.update);
   const removeSchedule = useMutation(api.schedules.remove);
+  const unblockParticipant = useMutation(api.schedules.unblockParticipant);
+
+  // Load blocked profiles
+  const blockedProfiles = useQuery(api.schedules.getBlockedProfiles, {
+    scheduleId: schedule._id,
+  });
 
   const [title, setTitle] = useState(schedule.title);
   const [description, setDescription] = useState(schedule.description || "");
@@ -264,6 +270,57 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
               </p>
             )}
           </div>
+
+          {/* Blocked users section */}
+          {blockedProfiles && blockedProfiles.length > 0 && (
+            <div className="border-t pt-4 dark:border-slate-700">
+              <h3 className="text-sm font-medium text-gray-700 mb-2 dark:text-slate-300">
+                Blocked Users
+              </h3>
+              <p className="text-xs text-gray-500 mb-3 dark:text-slate-400">
+                Blocked users cannot enter availability for this schedule. Unblock to allow them to participate again.
+              </p>
+              <div className="space-y-2">
+                {blockedProfiles.map((blocked) => (
+                  <div
+                    key={blocked._id}
+                    className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 dark:bg-slate-700/50"
+                  >
+                    <div className="flex items-center gap-2">
+                      {blocked.profileImageUrl ? (
+                        <img
+                          src={blocked.profileImageUrl}
+                          alt=""
+                          className="w-5 h-5 rounded-full"
+                        />
+                      ) : (
+                        <div className="w-5 h-5 rounded-full bg-gray-200 dark:bg-slate-600 flex items-center justify-center">
+                          <span className="text-[10px] text-gray-500 dark:text-slate-400">
+                            {blocked.displayName.charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
+                      <span className="text-xs text-gray-700 dark:text-slate-300">
+                        {blocked.displayName}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await unblockParticipant({
+                          scheduleId: schedule._id,
+                          profileId: blocked.profileId,
+                        });
+                      }}
+                      className="text-xs px-2 py-1 rounded text-blue-600 hover:bg-blue-50 border border-blue-200 hover:border-blue-300 transition-colors dark:text-blue-400 dark:hover:bg-blue-900/40 dark:border-blue-800 dark:hover:border-blue-700"
+                    >
+                      Unblock
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Delete section */}
           <div className="border-t pt-4 dark:border-slate-700">

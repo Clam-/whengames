@@ -14,6 +14,10 @@ export default defineSchema({
     displayName: v.string(),
     email: v.optional(v.string()),
     profileImageUrl: v.optional(v.string()),
+    // Convex file storage ID for the cached profile image (downloaded from Google)
+    profileImageStorageId: v.optional(v.id("_storage")),
+    // When the profile image was last re-downloaded (ms since epoch)
+    profileImageLastCheckedAt: v.optional(v.number()),
     timezone: v.string(),
     weekStartDay: v.number(), // 0=Sunday, 1=Monday, ..., 6=Saturday
     dstNotifications: v.boolean(),
@@ -52,10 +56,20 @@ export default defineSchema({
     ),
     isLocked: v.optional(v.boolean()),
     isPrivate: v.optional(v.boolean()),
+    acceptParticipation: v.optional(v.boolean()), // undefined/true = open, false = closed
     createdAt: v.number(),
   })
     .index("by_creatorProfileId", ["creatorProfileId"])
     .index("by_createdAt", ["createdAt"]),
+
+  // Blocked profiles per schedule (creator can block users from participating)
+  blockedProfiles: defineTable({
+    scheduleId: v.id("schedules"),
+    profileId: v.id("userProfiles"),
+    blockedAt: v.number(),
+  })
+    .index("by_schedule", ["scheduleId"])
+    .index("by_schedule_profile", ["scheduleId", "profileId"]),
 
   selections: defineTable({
     scheduleId: v.id("schedules"),

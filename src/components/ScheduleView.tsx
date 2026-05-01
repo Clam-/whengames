@@ -12,6 +12,7 @@ import { ApplyAvailabilityModal } from "./ApplyAvailabilityModal";
 import { SaveAvailabilityModal } from "./SaveAvailabilityModal";
 import { ManageSavedAvailabilitiesModal } from "./ManageSavedAvailabilitiesModal";
 import { EditScheduleModal } from "./EditScheduleModal";
+import { ParticipantsMenu } from "./ParticipantsMenu";
 import { useAnonymousUser } from "../hooks/useAnonymousUser";
 import { useTimezone } from "../hooks/useTimezone";
 import { detectTimezone, getWeekDates } from "../lib/timezone";
@@ -46,6 +47,9 @@ export function ScheduleView() {
   const clearDisallowedSlots = useMutation(api.schedules.clearDisallowedSlots);
   const clearLockedSlots = useMutation(api.schedules.clearLockedSlots);
   const clearSelections = useMutation(api.selections.clearForProfile);
+  const setAcceptParticipation = useMutation(api.schedules.setAcceptParticipation);
+  const removeParticipant = useMutation(api.schedules.removeParticipant);
+  const blockParticipant = useMutation(api.schedules.blockParticipant);
 
   const [selectMode, setSelectMode] = useState<SelectMode>("auto");
   const [allowMode, setAllowMode] = useState<AllowMode>("auto");
@@ -57,6 +61,7 @@ export function ScheduleView() {
   const [showSaveNewModal, setShowSaveNewModal] = useState(false);
   const [showManageModal, setShowManageModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [editingProfileId, setEditingProfileId] = useState<Id<"userProfiles"> | null>(null);
 
   // Saved availabilities (only for SSO users)
   const isSsoUser = profile?.authType === "sso";
@@ -89,9 +94,17 @@ export function ScheduleView() {
     }
   }, [isCreator, creatorMode]);
 
+  // Check if user is blocked from this schedule
+  const isBlocked = !isCreator && profile && schedule?.blockedProfileIds?.includes(profile._id as string);
+
+  // Check if participation is closed for non-creators
+  const isParticipationClosed = !isCreator && schedule?.acceptParticipation === false;
+
   // Determine if user can interact with the grid
   const canInteract =
-    (isAuthenticated && !!profile) || (hasInteracted && !!profile) || hasName;
+    ((isAuthenticated && !!profile) || (hasInteracted && !!profile) || hasName)
+    && !isBlocked
+    && !isParticipationClosed;
 
   // The reference date for the current week view
   const referenceDate = DateTime.now()
@@ -125,6 +138,9 @@ export function ScheduleView() {
     [anonymousId, getOrCreateProfile, profile, setDisplayName, timezone]
   );
 
+  // The effective profile for selections: either the user being edited or the current user
+  const effectiveProfileId = editingProfileId ?? profile?._id ?? null;
+
   const handleCellChange = useCallback(
     async (
       dayKey: string,
@@ -133,31 +149,36 @@ export function ScheduleView() {
       isException?: boolean,
       exceptionDate?: string
     ) => {
-      if (!profile) return;
+      if (!effectiveProfileId) return;
+
+      // When creator edits another user, pass callerProfileId for auth bypass
+      const callerProfileId = editingProfileId && profile ? profile._id : undefined;
 
       if (state === "blank") {
         await removeSelectionMut({
           scheduleId: id as Id<"schedules">,
-          profileId: profile._id,
+          profileId: effectiveProfileId,
           dayKey,
           timeSlot,
           isException,
           exceptionDate,
+          callerProfileId,
         });
       } else {
         await setSelectionMut({
           scheduleId: id as Id<"schedules">,
-          profileId: profile._id,
+          profileId: effectiveProfileId,
           dayKey,
           timeSlot,
           timezone,
           state,
           isException,
           exceptionDate,
+          callerProfileId,
         });
       }
     },
-    [id, profile, timezone, setSelectionMut, removeSelectionMut]
+    [id, effectiveProfileId, editingProfileId, profile, timezone, setSelectionMut, removeSelectionMut]
   );
 
   const handleBatchChange = useCallback(
@@ -170,16 +191,20 @@ export function ScheduleView() {
         exceptionDate?: string;
       }[]
     ) => {
-      if (!profile) return;
+      if (!effectiveProfileId) return;
+
+      // When creator edits another user, pass callerProfileId for auth bypass
+      const callerProfileId = editingProfileId && profile ? profile._id : undefined;
 
       await batchSetMut({
         scheduleId: id as Id<"schedules">,
-        profileId: profile._id,
+        profileId: effectiveProfileId,
         timezone,
         selections: cells,
+        callerProfileId,
       });
     },
-    [id, profile, timezone, batchSetMut]
+    [id, effectiveProfileId, editingProfileId, profile, timezone, batchSetMut]
   );
 
   const handleCreatorSlotChange = useCallback(
@@ -261,6 +286,61 @@ export function ScheduleView() {
       profileId: profile._id,
     });
   }, [profile, schedule, unlinkFromScheduleMut]);
+
+  // Participant management handlers (creator only)
+  const handleToggleAcceptParticipation = useCallback(
+    async (accept: boolean) => {
+      if (!schedule) return;
+      await setAcceptParticipation({
+        scheduleId: schedule._id,
+        acceptParticipation: accept,
+      });
+    },
+    [schedule, setAcceptParticipation]
+  );
+
+  const handleDeleteParticipant = useCallback(
+    async (profileId: Id<"userProfiles">) => {
+      if (!schedule) return;
+      // If we're currently editing this user, stop
+      if (editingProfileId === profileId) {
+        setEditingProfileId(null);
+      }
+      await removeParticipant({
+        scheduleId: schedule._id,
+        profileId,
+      });
+    },
+    [schedule, editingProfileId, removeParticipant]
+  );
+
+  const handleBlockParticipant = useCallback(
+    async (profileId: Id<"userProfiles">) => {
+      if (!schedule) return;
+      // If we're currently editing this user, stop
+      if (editingProfileId === profileId) {
+        setEditingProfileId(null);
+      }
+      await blockParticipant({
+        scheduleId: schedule._id,
+        profileId,
+      });
+    },
+    [schedule, editingProfileId, blockParticipant]
+  );
+
+  const handleEditParticipant = useCallback(
+    (profileId: Id<"userProfiles">) => {
+      setEditingProfileId(profileId);
+      // Switch to nominate mode so the creator can make selections
+      setCreatorMode("nominate");
+    },
+    []
+  );
+
+  const handleStopEditingParticipant = useCallback(() => {
+    setEditingProfileId(null);
+  }, []);
 
   // Clear modal content based on role and creator mode
   const getClearModalContent = () => {
@@ -442,6 +522,44 @@ export function ScheduleView() {
           </div>
         </div>
 
+        {/* Editing another user banner */}
+        {editingProfileId && (() => {
+          const editingUser = (schedule.profiles || []).find(
+            (p: any) => p._id === editingProfileId
+          );
+          return editingUser ? (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 dark:bg-amber-900/30 dark:border-amber-700">
+              <p className="text-sm text-amber-800 dark:text-amber-300">
+                You are editing <span className="font-semibold">{editingUser.displayName}</span>&apos;s availability.{" "}
+                <button
+                  onClick={handleStopEditingParticipant}
+                  className="text-amber-900 font-medium underline hover:text-amber-700 dark:text-amber-200 dark:hover:text-amber-100"
+                >
+                  Stop editing
+                </button>
+              </p>
+            </div>
+          ) : null;
+        })()}
+
+        {/* Participation closed banner (non-creators) */}
+        {!isCreator && schedule.acceptParticipation === false && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 dark:bg-rose-900/30 dark:border-rose-700">
+            <p className="text-sm text-red-700 dark:text-rose-300">
+              The creator has closed participation for this schedule. You cannot make changes to your availability.
+            </p>
+          </div>
+        )}
+
+        {/* Blocked user banner */}
+        {!isCreator && profile && schedule.blockedProfileIds?.includes(profile._id as string) && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 dark:bg-rose-900/30 dark:border-rose-700">
+            <p className="text-sm text-red-700 dark:text-rose-300">
+              You have been blocked from participating in this schedule.
+            </p>
+          </div>
+        )}
+
         {/* Non-current week banner for recurring schedules */}
         {schedule.type === "recurring" && weekOffset !== 0 && (
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 dark:bg-amber-900/30 dark:border-amber-700">
@@ -459,7 +577,7 @@ export function ScheduleView() {
         )}
 
         {/* Anonymous user prompt */}
-        {!canInteract && !isAuthenticated && (
+        {!canInteract && !isAuthenticated && !isBlocked && !isParticipationClosed && (
           <DisplayNamePrompt
             currentName={displayName}
             onSubmit={handleDisplayNameSubmit}
@@ -547,6 +665,59 @@ export function ScheduleView() {
             </div>
           )}
 
+          {/* Accept Participation toggle (creator only) */}
+          {isCreator && schedule && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-gray-600 dark:text-slate-400 whitespace-nowrap">
+                Accept Participation:
+              </label>
+              <button
+                onClick={() =>
+                  handleToggleAcceptParticipation(
+                    schedule.acceptParticipation === false
+                  )
+                }
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 ${
+                  schedule.acceptParticipation !== false
+                    ? "bg-green-500 dark:bg-emerald-500"
+                    : "bg-gray-300 dark:bg-slate-600"
+                }`}
+                title={
+                  schedule.acceptParticipation !== false
+                    ? "Participation is open. Click to close."
+                    : "Participation is closed. Click to open."
+                }
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform shadow-sm ${
+                    schedule.acceptParticipation !== false
+                      ? "translate-x-4.5"
+                      : "translate-x-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+          )}
+
+          {/* Participants menu (creator only) */}
+          {isCreator && schedule && (() => {
+            // Get participants (profiles that have selections, excluding creator)
+            const participantProfiles = (schedule.profiles || []).filter(
+              (p: any) => p._id !== schedule.creatorProfileId
+            );
+            return participantProfiles.length > 0 ? (
+              <ParticipantsMenu
+                participants={participantProfiles}
+                availabilityLinks={schedule.availabilityLinks || []}
+                editingProfileId={editingProfileId}
+                onEditUser={handleEditParticipant}
+                onStopEditing={handleStopEditingParticipant}
+                onDeleteUser={handleDeleteParticipant}
+                onBlockUser={handleBlockParticipant}
+              />
+            ) : null;
+          })()}
+
           {/* Availabilities menu (SSO users only) */}
           {isSsoUser && profile && canInteract && (
             <AvailabilitiesMenu
@@ -612,15 +783,15 @@ export function ScheduleView() {
         {/* The Grid */}
         <WeeklyGrid
           schedule={schedule}
-          profileId={profile?._id ?? null}
+          profileId={effectiveProfileId}
           userTimezone={timezone}
           weekStartDay={weekStartDay}
           selectMode={selectMode}
           allowMode={allowMode}
           weekOffset={weekOffset}
-          canInteract={canInteract}
+          canInteract={canInteract || !!editingProfileId}
           isCreator={!!isCreator}
-          creatorMode={creatorMode}
+          creatorMode={editingProfileId ? "nominate" : creatorMode}
           onCellChange={handleCellChange}
           onBatchChange={handleBatchChange}
           onCreatorSlotChange={handleCreatorSlotChange}

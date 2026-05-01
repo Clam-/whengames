@@ -208,6 +208,9 @@ export function UserSettingsModal({ profile, onClose }: Props) {
                   src={profile.ssoImage}
                   alt=""
                   className="w-10 h-10 rounded-full mt-0.5"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = "none";
+                  }}
                 />
               )}
               <div className="flex-1">

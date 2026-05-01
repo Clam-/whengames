@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useEffect, useRef, useState } from "react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useLocation } from "react-router";
 import { api } from "../../convex/_generated/api";
@@ -18,6 +18,18 @@ export function Header() {
   const profile = useQuery(api.users.currentUserProfile, {
     anonymousId: anonymousId || undefined,
   });
+
+  // Refresh cached profile image on each app access (throttled to once/24h server-side)
+  const refreshProfileImage = useMutation(
+    api.users.refreshProfileImageIfNeeded
+  );
+  const hasRefreshed = useRef(false);
+  useEffect(() => {
+    if (isAuthenticated && !isLoading && !hasRefreshed.current) {
+      hasRefreshed.current = true;
+      refreshProfileImage().catch(() => {});
+    }
+  }, [isAuthenticated, isLoading, refreshProfileImage]);
 
   const handleLogin = () => {
     // Redirect back to the current page after OAuth sign-in
@@ -45,13 +57,16 @@ export function Header() {
             ) : isAuthenticated || profile?.isAuthenticated ? (
               <>
                 <div className="flex items-center gap-2">
-                  {(profile?.ssoImage || profile?.profileImageUrl) && (
+                  {(profile?.ssoImage || profile?.profileImageUrl) ? (
                     <img
                       src={profile.ssoImage || profile.profileImageUrl}
                       alt=""
                       className="w-7 h-7 rounded-full"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = "none";
+                      }}
                     />
-                  )}
+                  ) : null}
                   <span className="text-sm text-gray-700 dark:text-slate-300">
                     {profile?.displayName ||
                       profile?.ssoName ||

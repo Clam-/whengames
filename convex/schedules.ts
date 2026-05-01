@@ -30,10 +30,14 @@ export const list = query({
     const enriched = await Promise.all(
       publicSchedules.map(async (schedule) => {
         const creator = await ctx.db.get(schedule.creatorProfileId);
+        // Prefer Convex-stored image over hotlinked Google URL
+        const storedImageUrl = creator?.profileImageStorageId
+          ? await ctx.storage.getUrl(creator.profileImageStorageId)
+          : null;
         return {
           ...schedule,
           creatorName: creator?.displayName ?? "Unknown",
-          creatorImage: creator?.profileImageUrl,
+          creatorImage: storedImageUrl ?? creator?.profileImageUrl,
         };
       })
     );
@@ -160,26 +164,42 @@ export const get = query({
     const profilesRaw = await Promise.all(
       [...profileIdSet].map(async (id) => {
         const profile = await ctx.db.get(id as Id<"userProfiles">);
-        return profile
-          ? {
-              _id: profile._id,
-              displayName: profile.displayName,
-              profileImageUrl: profile.profileImageUrl,
-              timezone: profile.timezone,
-            }
+        if (!profile) return null;
+        // Prefer Convex-stored image over hotlinked Google URL
+        const storedImageUrl = profile.profileImageStorageId
+          ? await ctx.storage.getUrl(profile.profileImageStorageId)
           : null;
+        return {
+          _id: profile._id,
+          displayName: profile.displayName,
+          profileImageUrl: storedImageUrl ?? profile.profileImageUrl,
+          timezone: profile.timezone,
+        };
       })
     );
     const profiles = profilesRaw.filter((p) => p !== null);
 
+    // Get blocked profiles for this schedule
+    const blockedProfiles = await ctx.db
+      .query("blockedProfiles")
+      .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
+      .collect();
+    const blockedProfileIds = blockedProfiles.map((b) => b.profileId as string);
+
+    // Prefer Convex-stored image over hotlinked Google URL for creator
+    const creatorStoredImageUrl = creator?.profileImageStorageId
+      ? await ctx.storage.getUrl(creator.profileImageStorageId)
+      : null;
+
     return {
       ...schedule,
       creatorName: creator?.displayName ?? "Unknown",
-      creatorImage: creator?.profileImageUrl,
+      creatorImage: creatorStoredImageUrl ?? creator?.profileImageUrl,
       creatorTimezoneStored: creator?.timezone ?? schedule.creatorTimezone,
       selections: allSelections,
       profiles,
       availabilityLinks: availabilityLinkInfo,
+      blockedProfileIds,
     };
   },
 });
@@ -399,6 +419,15 @@ export const remove = mutation({
       await ctx.db.delete(link._id);
     }
 
+    // Delete blocked profiles
+    const blocked = await ctx.db
+      .query("blockedProfiles")
+      .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
+      .collect();
+    for (const b of blocked) {
+      await ctx.db.delete(b._id);
+    }
+
     // Delete DST check logs
     const dstLogs = await ctx.db
       .query("dstCheckLog")
@@ -507,6 +536,160 @@ export const clearDisallowedSlots = mutation({
     await ctx.db.patch(args.scheduleId, {
       disallowedSlots: [],
     });
+  },
+});
+
+// Toggle accept participation (creator only)
+export const setAcceptParticipation = mutation({
+  args: {
+    scheduleId: v.id("schedules"),
+    acceptParticipation: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (!schedule) return;
+
+    await ctx.db.patch(args.scheduleId, {
+      acceptParticipation: args.acceptParticipation,
+    });
+  },
+});
+
+// Remove a participant's selections from a schedule (creator only)
+export const removeParticipant = mutation({
+  args: {
+    scheduleId: v.id("schedules"),
+    profileId: v.id("userProfiles"),
+  },
+  handler: async (ctx, args) => {
+    // Unlink any saved availability
+    const link = await ctx.db
+      .query("availabilityLinks")
+      .withIndex("by_schedule_profile", (q) =>
+        q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
+      )
+      .unique();
+    if (link) {
+      await ctx.db.delete(link._id);
+    }
+
+    // Delete all selections for this profile on this schedule
+    while (true) {
+      const batch = await ctx.db
+        .query("selections")
+        .withIndex("by_schedule_profile", (q) =>
+          q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
+        )
+        .take(100);
+
+      if (batch.length === 0) break;
+
+      for (const record of batch) {
+        await ctx.db.delete(record._id);
+      }
+    }
+  },
+});
+
+// Block a profile from participating in a schedule (creator only)
+// Also removes their existing selections
+export const blockParticipant = mutation({
+  args: {
+    scheduleId: v.id("schedules"),
+    profileId: v.id("userProfiles"),
+  },
+  handler: async (ctx, args) => {
+    // Check if already blocked
+    const existing = await ctx.db
+      .query("blockedProfiles")
+      .withIndex("by_schedule_profile", (q) =>
+        q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
+      )
+      .unique();
+
+    if (!existing) {
+      await ctx.db.insert("blockedProfiles", {
+        scheduleId: args.scheduleId,
+        profileId: args.profileId,
+        blockedAt: Date.now(),
+      });
+    }
+
+    // Unlink any saved availability
+    const link = await ctx.db
+      .query("availabilityLinks")
+      .withIndex("by_schedule_profile", (q) =>
+        q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
+      )
+      .unique();
+    if (link) {
+      await ctx.db.delete(link._id);
+    }
+
+    // Delete all selections for this profile on this schedule
+    while (true) {
+      const batch = await ctx.db
+        .query("selections")
+        .withIndex("by_schedule_profile", (q) =>
+          q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
+        )
+        .take(100);
+
+      if (batch.length === 0) break;
+
+      for (const record of batch) {
+        await ctx.db.delete(record._id);
+      }
+    }
+  },
+});
+
+// Unblock a profile from a schedule
+export const unblockParticipant = mutation({
+  args: {
+    scheduleId: v.id("schedules"),
+    profileId: v.id("userProfiles"),
+  },
+  handler: async (ctx, args) => {
+    const blocked = await ctx.db
+      .query("blockedProfiles")
+      .withIndex("by_schedule_profile", (q) =>
+        q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
+      )
+      .unique();
+
+    if (blocked) {
+      await ctx.db.delete(blocked._id);
+    }
+  },
+});
+
+// Get blocked profiles for a schedule
+export const getBlockedProfiles = query({
+  args: { scheduleId: v.id("schedules") },
+  handler: async (ctx, args) => {
+    const blocked = await ctx.db
+      .query("blockedProfiles")
+      .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
+      .collect();
+
+    // Enrich with profile info
+    const enriched = await Promise.all(
+      blocked.map(async (b) => {
+        const profile = await ctx.db.get(b.profileId);
+        // Prefer Convex-stored image over hotlinked Google URL
+        const storedImageUrl = profile?.profileImageStorageId
+          ? await ctx.storage.getUrl(profile.profileImageStorageId)
+          : null;
+        return {
+          ...b,
+          displayName: profile?.displayName ?? "Unknown",
+          profileImageUrl: storedImageUrl ?? profile?.profileImageUrl,
+        };
+      })
+    );
+
+    return enriched;
   },
 });
 

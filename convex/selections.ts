@@ -2,6 +2,43 @@ import { v } from "convex/values";
 import { mutation, query, MutationCtx } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 
+// Helper: check if a profile is blocked from a schedule
+async function isProfileBlocked(
+  ctx: MutationCtx,
+  scheduleId: Id<"schedules">,
+  profileId: Id<"userProfiles">
+): Promise<boolean> {
+  const blocked = await ctx.db
+    .query("blockedProfiles")
+    .withIndex("by_schedule_profile", (q) =>
+      q.eq("scheduleId", scheduleId).eq("profileId", profileId)
+    )
+    .unique();
+  return blocked !== null;
+}
+
+// Helper: check if participation is closed and user is not creator
+// callerProfileId allows a creator to act on behalf of another user
+async function isParticipationDenied(
+  ctx: MutationCtx,
+  scheduleId: Id<"schedules">,
+  profileId: Id<"userProfiles">,
+  callerProfileId?: Id<"userProfiles">
+): Promise<boolean> {
+  const schedule = await ctx.db.get(scheduleId);
+  if (!schedule) return true;
+
+  // Creator is always allowed (either as themselves or acting on behalf)
+  if (schedule.creatorProfileId === profileId) return false;
+  if (callerProfileId && schedule.creatorProfileId === callerProfileId) return false;
+
+  // Check if participation is closed
+  if (schedule.acceptParticipation === false) return true;
+
+  // Check if profile is blocked
+  return await isProfileBlocked(ctx, scheduleId, profileId);
+}
+
 // Helper: check if a slot is in the schedule's disallowed list
 function isSlotDisallowed(
   disallowedSlots: { dayKey: string; timeSlot: string }[] | undefined,
@@ -78,8 +115,14 @@ export const set = mutation({
     ),
     isException: v.optional(v.boolean()),
     exceptionDate: v.optional(v.string()),
+    callerProfileId: v.optional(v.id("userProfiles")),
   },
   handler: async (ctx, args) => {
+    // Guard: reject if participation denied (closed or blocked)
+    if (await isParticipationDenied(ctx, args.scheduleId, args.profileId, args.callerProfileId)) {
+      return null;
+    }
+
     // Guard: reject nominations on disallowed cells
     const schedule = await ctx.db.get(args.scheduleId);
     if (
@@ -173,8 +216,14 @@ export const remove = mutation({
     timeSlot: v.string(),
     isException: v.optional(v.boolean()),
     exceptionDate: v.optional(v.string()),
+    callerProfileId: v.optional(v.id("userProfiles")),
   },
   handler: async (ctx, args) => {
+    // Guard: reject if participation denied (closed or blocked)
+    if (await isParticipationDenied(ctx, args.scheduleId, args.profileId, args.callerProfileId)) {
+      return;
+    }
+
     // Guard: reject changes on disallowed cells
     const schedule = await ctx.db.get(args.scheduleId);
     if (
@@ -258,8 +307,14 @@ export const batchSet = mutation({
         exceptionDate: v.optional(v.string()),
       })
     ),
+    callerProfileId: v.optional(v.id("userProfiles")),
   },
   handler: async (ctx, args) => {
+    // Guard: reject if participation denied (closed or blocked)
+    if (await isParticipationDenied(ctx, args.scheduleId, args.profileId, args.callerProfileId)) {
+      return;
+    }
+
     // Load schedule once to check disallowed slots and date range
     const schedule = await ctx.db.get(args.scheduleId);
     const disallowed = schedule?.disallowedSlots;

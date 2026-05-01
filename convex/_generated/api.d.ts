@@ -12,6 +12,7 @@ import type * as auth from "../auth.js";
 import type * as crons from "../crons.js";
 import type * as dstNotifications from "../dstNotifications.js";
 import type * as http from "../http.js";
+import type * as profileImages from "../profileImages.js";
 import type * as savedAvailabilities from "../savedAvailabilities.js";
 import type * as schedules from "../schedules.js";
 import type * as selections from "../selections.js";
@@ -28,6 +29,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   dstNotifications: typeof dstNotifications;
   http: typeof http;
+  profileImages: typeof profileImages;
   savedAvailabilities: typeof savedAvailabilities;
   schedules: typeof schedules;
   selections: typeof selections;
