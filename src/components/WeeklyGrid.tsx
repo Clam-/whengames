@@ -939,7 +939,7 @@ export function WeeklyGrid({
 
                       {/* Profile icons for other users */}
                       {otherSelections.length > 0 && (
-                        <div className="flex flex-wrap gap-px">
+                        <div className="flex flex-wrap items-center gap-0.5 h-full">
                           {(
                             ["can-do", "cant-do", "maybe"] as const
                           ).map((state) => {

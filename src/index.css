@@ -172,27 +172,28 @@
 
 /* Profile icon groups in cells */
 .profile-group {
-  @apply inline-flex flex-wrap gap-px p-px rounded;
+  @apply inline-flex flex-wrap items-center gap-0.5 rounded;
+  padding: 3px 6px;
 }
 .profile-group.can-do {
-  @apply bg-can-do/30;
+  background-color: #86efac;
 }
 .profile-group.cant-do {
-  @apply bg-cant-do/30;
+  background-color: #fca5a5;
 }
 .profile-group.maybe {
-  @apply bg-maybe/30;
+  background-color: #fde047;
 }
 
 /* Muted profile groups in disallowed cells */
 .grid-cell.disallowed .profile-group.can-do {
-  background-color: rgba(140, 160, 148, 0.3);
+  background-color: #6ee7b7;
 }
 .grid-cell.disallowed .profile-group.cant-do {
-  background-color: rgba(160, 140, 140, 0.3);
+  background-color: #f8a5a5;
 }
 .grid-cell.disallowed .profile-group.maybe {
-  background-color: rgba(160, 155, 140, 0.3);
+  background-color: #fcd34d;
 }
 
 .profile-icon {
@@ -274,14 +275,24 @@
     background-color: #0f172a; /* slate-900 */
   }
 
+  .profile-group.can-do {
+    background-color: #10b981;
+  }
+  .profile-group.cant-do {
+    background-color: #ef4444;
+  }
+  .profile-group.maybe {
+    background-color: #f59e0b;
+  }
+
   /* Muted profile groups in disallowed cells */
   .grid-cell.disallowed .profile-group.can-do {
-    background-color: rgba(5, 150, 105, 0.2);
+    background-color: #059669;
   }
   .grid-cell.disallowed .profile-group.cant-do {
-    background-color: rgba(225, 29, 72, 0.2);
+    background-color: #dc2626;
   }
   .grid-cell.disallowed .profile-group.maybe {
-    background-color: rgba(217, 119, 6, 0.2);
+    background-color: #d97706;
   }
 }
