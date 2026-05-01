@@ -5,6 +5,7 @@ import { useLocation } from "react-router";
 import { api } from "../../convex/_generated/api";
 import { useAnonymousUser } from "../hooks/useAnonymousUser";
 import { UserSettingsModal } from "./UserSettingsModal";
+import { AnimatedTitle } from "./AnimatedTitle";
 
 export function Header() {
   const { isAuthenticated, isLoading } = useConvexAuth();
@@ -46,9 +47,7 @@ export function Header() {
       <header className="bg-white border-b border-gray-200 shadow-sm dark:bg-slate-800 dark:border-slate-700">
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
           <a href="/" className="flex items-center gap-2 no-underline">
-            <span className="text-xl font-bold text-gray-900 dark:text-slate-100">
-              When games?
-            </span>
+            <AnimatedTitle />
           </a>
 
           <div className="flex items-center gap-3">

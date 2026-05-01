@@ -1,4 +1,4 @@
-# When games?
+# When?
 
 A real-time scheduling web app for coordinating availability between people. Supports anonymous and Google-authenticated users, one-off and recurring weekly schedules, timezone-aware DST handling, and live collaborative editing.
 
@@ -125,10 +125,10 @@ Then build and deploy:
 npx convex deploy
 
 # Build Docker image
-docker build --build-arg VITE_CONVEX_URL=https://your-production.convex.cloud -t when-games .
+docker build --build-arg VITE_CONVEX_URL=https://your-production.convex.cloud -t when .
 
 # Run
-docker run -p 80:80 when-games
+docker run -p 80:80 when
 ```
 
 ## Architecture

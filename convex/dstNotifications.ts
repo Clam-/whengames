@@ -211,14 +211,14 @@ export const checkUpcomingDstChanges = internalMutation({
           //
           // sendEmail({
           //   to: userEmail,
-          //   subject: `[When games?] DST change affecting "${schedule.title}"`,
+          //   subject: `[When?] DST change affecting "${schedule.title}"`,
           //   body: impact.impact,
           // });
           //
           // Also notify the schedule creator:
           // sendEmail({
           //   to: creatorEmail,
-          //   subject: `[When games?] DST change affecting participant in "${schedule.title}"`,
+          //   subject: `[When?] DST change affecting participant in "${schedule.title}"`,
           //   body: `User ${userName} (${impact.timezone}) will be affected by DST: ${impact.impact}`,
           // });
           // ============================================
