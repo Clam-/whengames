@@ -1,8 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { auth } from "./auth";
-import { Doc, Id } from "./_generated/dataModel";
+import { Id } from "./_generated/dataModel";
 
 // Get or create an anonymous user profile
 export const getOrCreateAnonymousProfile = mutation({
@@ -42,7 +41,7 @@ export const getProfileByAnonymousId = query({
   },
 });
 
-// Get profile by auth user ID
+// Get profile by auth user ID (tokenIdentifier)
 export const getProfileByAuthUserId = query({
   args: { authUserId: v.string() },
   handler: async (ctx, args) => {
@@ -57,29 +56,28 @@ export const getProfileByAuthUserId = query({
 export const currentUserProfile = query({
   args: { anonymousId: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
+    const identity = await ctx.auth.getUserIdentity();
 
-    if (userId) {
-      // Fetch SSO user info from the Convex Auth users table
-      const authUser = await ctx.db.get(userId);
+    if (identity) {
+      const tokenIdentifier = identity.tokenIdentifier;
 
       // Authenticated user - find their profile
       const profile = await ctx.db
         .query("userProfiles")
-        .withIndex("by_authUserId", (q) => q.eq("authUserId", userId))
+        .withIndex("by_authUserId", (q) => q.eq("authUserId", tokenIdentifier))
         .unique();
       if (profile) {
         // Prefer Convex-stored image over hotlinked Google URL
         const storedImageUrl = profile.profileImageStorageId
           ? await ctx.storage.getUrl(profile.profileImageStorageId)
           : null;
-        const resolvedImage = storedImageUrl ?? authUser?.image;
+        const resolvedImage = storedImageUrl ?? identity.pictureUrl;
         return {
           ...profile,
           isAuthenticated: true as const,
           authType: "sso" as const,
-          ssoName: authUser?.name,
-          ssoEmail: authUser?.email,
+          ssoName: identity.name,
+          ssoEmail: identity.email,
           ssoImage: resolvedImage,
         };
       }
@@ -97,13 +95,13 @@ export const currentUserProfile = query({
           const storedImageUrl = anonProfile.profileImageStorageId
             ? await ctx.storage.getUrl(anonProfile.profileImageStorageId)
             : null;
-          const resolvedImage = storedImageUrl ?? authUser?.image;
+          const resolvedImage = storedImageUrl ?? identity.pictureUrl;
           return {
             ...anonProfile,
             isAuthenticated: true as const,
             authType: "sso" as const,
-            ssoName: authUser?.name,
-            ssoEmail: authUser?.email,
+            ssoName: identity.name,
+            ssoEmail: identity.email,
             ssoImage: resolvedImage,
           };
         }
@@ -112,17 +110,17 @@ export const currentUserProfile = query({
       // No profile at all yet — return SSO info so the UI can render
       return {
         _id: undefined as unknown as Id<"userProfiles">,
-        displayName: authUser?.name ?? authUser?.email ?? "User",
-        email: authUser?.email,
-        profileImageUrl: authUser?.image,
+        displayName: identity.name ?? identity.email ?? "User",
+        email: identity.email,
+        profileImageUrl: identity.pictureUrl,
         timezone: "UTC",
         weekStartDay: 0,
         dstNotifications: true,
         isAuthenticated: true as const,
         authType: "sso" as const,
-        ssoName: authUser?.name,
-        ssoEmail: authUser?.email,
-        ssoImage: authUser?.image,
+        ssoName: identity.name,
+        ssoEmail: identity.email,
+        ssoImage: identity.pictureUrl,
       };
     }
 
@@ -181,19 +179,18 @@ export const mergeAnonymousToAuth = mutation({
     anonymousId: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
 
-    // Fetch user info from Convex Auth users table
-    const authUser = await ctx.db.get(userId);
-    const email = authUser?.email;
-    const profileImageUrl = authUser?.image;
-    const displayName = authUser?.name;
+    const tokenIdentifier = identity.tokenIdentifier;
+    const email = identity.email;
+    const profileImageUrl = identity.pictureUrl;
+    const displayName = identity.name;
 
     // Check if auth user already has a profile
     const existingAuthProfile = await ctx.db
       .query("userProfiles")
-      .withIndex("by_authUserId", (q) => q.eq("authUserId", userId))
+      .withIndex("by_authUserId", (q) => q.eq("authUserId", tokenIdentifier))
       .unique();
 
     // Find anonymous profile
@@ -274,7 +271,7 @@ export const mergeAnonymousToAuth = mutation({
     } else if (anonProfile) {
       // Only anon exists - upgrade it to authenticated
       await ctx.db.patch(anonProfile._id, {
-        authUserId: userId,
+        authUserId: tokenIdentifier,
         email,
         profileImageUrl,
         displayName: anonProfile.displayName || displayName || "User",
@@ -292,7 +289,7 @@ export const mergeAnonymousToAuth = mutation({
     } else {
       // No anon profile - create new auth profile
       const newProfileId = await ctx.db.insert("userProfiles", {
-        authUserId: userId,
+        authUserId: tokenIdentifier,
         displayName: displayName || "User",
         email,
         profileImageUrl,
@@ -321,19 +318,18 @@ export const ensureAuthProfile = mutation({
     timezone: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
 
-    // Fetch user info from Convex Auth users table (populated by Google OAuth)
-    const authUser = await ctx.db.get(userId);
-    const email = authUser?.email;
-    const profileImageUrl = authUser?.image;
-    const displayName = authUser?.name;
+    const tokenIdentifier = identity.tokenIdentifier;
+    const email = identity.email;
+    const profileImageUrl = identity.pictureUrl;
+    const displayName = identity.name;
 
     // Check if auth user already has a profile
     let authProfile = await ctx.db
       .query("userProfiles")
-      .withIndex("by_authUserId", (q) => q.eq("authUserId", userId))
+      .withIndex("by_authUserId", (q) => q.eq("authUserId", tokenIdentifier))
       .unique();
 
     // Find anonymous profile if anonymousId provided
@@ -414,7 +410,7 @@ export const ensureAuthProfile = mutation({
     } else if (anonProfile && !authProfile) {
       // Upgrade anon to auth
       await ctx.db.patch(anonProfile._id, {
-        authUserId: userId,
+        authUserId: tokenIdentifier,
         email,
         profileImageUrl,
       });
@@ -447,7 +443,7 @@ export const ensureAuthProfile = mutation({
     } else {
       // Create new
       const newProfileId = await ctx.db.insert("userProfiles", {
-        authUserId: userId,
+        authUserId: tokenIdentifier,
         displayName: displayName || "User",
         email,
         profileImageUrl,
@@ -480,11 +476,9 @@ export const unlinkSso = mutation({
     if (!profile) throw new Error("Profile not found");
     if (!profile.authUserId) throw new Error("Profile is not linked to SSO");
 
-    // If display name is empty or not set, use the SSO name before unlinking
-    const authUser = await ctx.db.get(
-      profile.authUserId as Id<"users">
-    );
-    const ssoName = authUser?.name;
+    // Get the current user's identity for the SSO name fallback
+    const identity = await ctx.auth.getUserIdentity();
+    const ssoName = identity?.name;
 
     // Clean up stored profile image from Convex storage
     if (profile.profileImageStorageId) {
@@ -518,12 +512,14 @@ const PROFILE_IMAGE_REFRESH_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 export const refreshProfileImageIfNeeded = mutation({
   args: {},
   handler: async (ctx) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) return;
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return;
+
+    const tokenIdentifier = identity.tokenIdentifier;
 
     const profile = await ctx.db
       .query("userProfiles")
-      .withIndex("by_authUserId", (q) => q.eq("authUserId", userId))
+      .withIndex("by_authUserId", (q) => q.eq("authUserId", tokenIdentifier))
       .unique();
     if (!profile) return;
 
@@ -536,11 +532,8 @@ export const refreshProfileImageIfNeeded = mutation({
       return;
     }
 
-    // Fetch the latest Google image URL from the auth users table.
-    // This may differ from profileImageUrl if the user re-authenticated
-    // and Google returned a new URL.
-    const authUser = await ctx.db.get(userId);
-    const imageUrl = authUser?.image ?? profile.profileImageUrl;
+    // Use the current Google picture URL from the identity
+    const imageUrl = identity.pictureUrl ?? profile.profileImageUrl;
     if (!imageUrl) return;
 
     // Stamp the throttle first so concurrent calls don't duplicate

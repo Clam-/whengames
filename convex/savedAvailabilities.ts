@@ -1,6 +1,5 @@
 import { v } from "convex/values";
 import { mutation, query, MutationCtx } from "./_generated/server";
-import { auth } from "./auth";
 import { Id } from "./_generated/dataModel";
 
 // List saved availabilities for a profile
@@ -86,8 +85,8 @@ export const saveNewAndLink = mutation({
     timezone: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
 
     // Get effective current slots
     const slots = await getEffectiveSlots(ctx, args.scheduleId, args.profileId);
@@ -143,8 +142,8 @@ export const saveOverwriteDefaultAndLink = mutation({
     timezone: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
 
     // Get effective current slots
     const slots = await getEffectiveSlots(ctx, args.scheduleId, args.profileId);
@@ -216,8 +215,8 @@ export const applyToSchedule = mutation({
     profileId: v.id("userProfiles"),
   },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
 
     // Remove existing link if any
     const existingLink = await ctx.db
@@ -259,8 +258,8 @@ export const unlinkFromSchedule = mutation({
     profileId: v.id("userProfiles"),
   },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
 
     const link = await ctx.db
       .query("availabilityLinks")
@@ -298,8 +297,8 @@ export const deleteSaved = mutation({
     savedAvailabilityId: v.id("savedAvailabilities"),
   },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
 
     const savedAvail = await ctx.db.get(args.savedAvailabilityId);
 
@@ -341,8 +340,8 @@ export const renameSaved = mutation({
     name: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
 
     await ctx.db.patch(args.savedAvailabilityId, { name: args.name });
   },

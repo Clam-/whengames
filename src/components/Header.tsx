@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { useAuthActions } from "@convex-dev/auth/react";
+import { useMutation, useQuery } from "convex/react";
 import { useLocation } from "react-router";
 import { api } from "../../convex/_generated/api";
+import { useGoogleAuth } from "../lib/googleAuth";
 import { useAnonymousUser } from "../hooks/useAnonymousUser";
 import { UserSettingsModal } from "./UserSettingsModal";
 import { AnimatedTitle } from "./AnimatedTitle";
 
 export function Header() {
-  const { isAuthenticated, isLoading } = useConvexAuth();
-  const { signIn, signOut } = useAuthActions();
+  const { isAuthenticated, isLoading, signIn, signOut } = useGoogleAuth();
   const { anonymousId, hasInteracted, clearAnonymousUser } = useAnonymousUser();
   const location = useLocation();
   const [showSettings, setShowSettings] = useState(false);
@@ -35,11 +34,11 @@ export function Header() {
   const handleLogin = () => {
     // Redirect back to the current page after OAuth sign-in
     const currentPath = location.pathname + location.search + location.hash;
-    void signIn("google", { redirectTo: currentPath });
+    signIn(currentPath);
   };
 
-  const handleLogout = async () => {
-    await signOut();
+  const handleLogout = () => {
+    signOut();
   };
 
   return (

@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useMutation } from "convex/react";
-import { useAuthActions } from "@convex-dev/auth/react";
 import { api } from "../../convex/_generated/api";
+import { useGoogleAuth } from "../lib/googleAuth";
 import { getCommonTimezones } from "../lib/timezone";
 import { Id } from "../../convex/_generated/dataModel";
 
@@ -129,7 +129,7 @@ function TimezoneSearchSelect({
 export function UserSettingsModal({ profile, onClose }: Props) {
   const updateProfile = useMutation(api.users.updateProfile);
   const unlinkSso = useMutation(api.users.unlinkSso);
-  const { signOut } = useAuthActions();
+  const { signOut } = useGoogleAuth();
 
   const [displayName, setDisplayName] = useState(profile.displayName);
   const [timezone, setTimezone] = useState(profile.timezone);
@@ -157,8 +157,8 @@ export function UserSettingsModal({ profile, onClose }: Props) {
       localStorage.setItem(ANON_ID_KEY, newAnonymousId);
       localStorage.setItem(ANON_NAME_KEY, result.displayName);
 
-      // Sign out of SSO
-      await signOut();
+      // Sign out (clear Google token)
+      signOut();
       setShowUnlinkConfirm(false);
       onClose();
       window.location.reload();

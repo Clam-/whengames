@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "react-router";
-import { useQuery, useMutation, useConvexAuth } from "convex/react";
+import { useQuery, useMutation } from "convex/react";
+import { useGoogleAuth } from "../lib/googleAuth";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { Header } from "./Header";
@@ -24,7 +25,7 @@ type CreatorMode = "limit" | "nominate" | "lock" | null;
 
 export function ScheduleView() {
   const { id } = useParams<{ id: string }>();
-  const { isAuthenticated } = useConvexAuth();
+  const { isAuthenticated } = useGoogleAuth();
   const { anonymousId, displayName, setDisplayName, hasInteracted } =
     useAnonymousUser();
 

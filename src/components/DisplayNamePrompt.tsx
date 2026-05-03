@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useAuthActions } from "@convex-dev/auth/react";
 import { useLocation } from "react-router";
+import { useGoogleAuth } from "../lib/googleAuth";
 
 interface Props {
   currentName: string;
@@ -9,7 +9,7 @@ interface Props {
 
 export function DisplayNamePrompt({ currentName, onSubmit }: Props) {
   const [name, setName] = useState(currentName);
-  const { signIn } = useAuthActions();
+  const { signIn } = useGoogleAuth();
   const location = useLocation();
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -21,7 +21,7 @@ export function DisplayNamePrompt({ currentName, onSubmit }: Props) {
 
   const handleLogin = () => {
     const currentPath = location.pathname + location.search + location.hash;
-    void signIn("google", { redirectTo: currentPath });
+    signIn(currentPath);
   };
 
   return (

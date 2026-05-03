@@ -1,13 +1,10 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { authTables } from "@convex-dev/auth/server";
 
 export default defineSchema({
-  ...authTables,
-
-  // Our own user profiles (both anonymous and authenticated)
+  // User profiles (both anonymous and authenticated via Google)
   userProfiles: defineTable({
-    // Link to Convex Auth user (set when authenticated via Google)
+    // Google identity tokenIdentifier (set when authenticated via Google)
     authUserId: v.optional(v.string()),
     // Anonymous identifier stored in client localStorage
     anonymousId: v.optional(v.string()),
