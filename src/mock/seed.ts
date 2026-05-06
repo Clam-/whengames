@@ -1,0 +1,172 @@
+/**
+ * Seed data for design mode.
+ *
+ * Populates the in-memory store with realistic sample data on import.
+ * The anonymous user's ID is read from (or written to) localStorage so
+ * it stays in sync with useAnonymousUser.
+ */
+
+import { insert } from "./store";
+
+// ---------------------------------------------------------------------------
+// Anonymous user ID — kept in sync with useAnonymousUser hook
+// ---------------------------------------------------------------------------
+
+const ANON_ID_KEY = "whengames_anonymous_id";
+const ANON_NAME_KEY = "whengames_anonymous_name";
+
+function getOrCreateAnonymousId(): string {
+  let id = localStorage.getItem(ANON_ID_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(ANON_ID_KEY, id);
+  }
+  return id;
+}
+
+const anonymousId = getOrCreateAnonymousId();
+
+// Set a display name if none exists so the user is "already onboarded"
+if (!localStorage.getItem(ANON_NAME_KEY)) {
+  localStorage.setItem(ANON_NAME_KEY, "Designer");
+}
+
+// ---------------------------------------------------------------------------
+// Helper: compute ISO dates relative to today
+// ---------------------------------------------------------------------------
+
+function isoDate(daysFromNow: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + daysFromNow);
+  return d.toISOString().slice(0, 10);
+}
+
+const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+// ---------------------------------------------------------------------------
+// Profiles
+// ---------------------------------------------------------------------------
+
+const designerProfileId = insert("userProfiles", {
+  anonymousId,
+  displayName: localStorage.getItem(ANON_NAME_KEY) || "Designer",
+  timezone: userTimezone,
+  weekStartDay: 0,
+  dstNotifications: true,
+});
+
+const aliceProfileId = insert("userProfiles", {
+  anonymousId: "mock-alice-id",
+  displayName: "Alice Chen",
+  timezone: "America/New_York",
+  weekStartDay: 1,
+  dstNotifications: true,
+});
+
+const bobProfileId = insert("userProfiles", {
+  anonymousId: "mock-bob-id",
+  displayName: "Bob Martinez",
+  timezone: "America/Los_Angeles",
+  weekStartDay: 0,
+  dstNotifications: false,
+});
+
+// ---------------------------------------------------------------------------
+// Schedules
+// ---------------------------------------------------------------------------
+
+const recurringScheduleId = insert("schedules", {
+  title: "Friday Game Night",
+  description: "Weekly board game session — mark when you can make it!",
+  type: "recurring",
+  creatorProfileId: designerProfileId,
+  recurringStartDate: isoDate(-7),
+  creatorTimezone: userTimezone,
+  createdAt: Date.now() - 86400000 * 3,
+  acceptParticipation: true,
+});
+
+const oneOffScheduleId = insert("schedules", {
+  title: "Holiday Planning",
+  description: "Finding the best day for our trip next week.",
+  type: "one-off",
+  creatorProfileId: aliceProfileId,
+  dateRangeStart: isoDate(1),
+  dateRangeEnd: isoDate(7),
+  creatorTimezone: "America/New_York",
+  createdAt: Date.now() - 86400000,
+  acceptParticipation: true,
+});
+
+// ---------------------------------------------------------------------------
+// Selections — recurring schedule (dayKey = "0"-"6" for day-of-week)
+// ---------------------------------------------------------------------------
+
+const recurringSlots = [
+  // Designer's availability (Fri/Sat evening slots)
+  { profileId: designerProfileId, dayKey: "5", timeSlot: "18:00", state: "can-do" as const },
+  { profileId: designerProfileId, dayKey: "5", timeSlot: "19:00", state: "can-do" as const },
+  { profileId: designerProfileId, dayKey: "5", timeSlot: "20:00", state: "can-do" as const },
+  { profileId: designerProfileId, dayKey: "6", timeSlot: "18:00", state: "maybe" as const },
+  { profileId: designerProfileId, dayKey: "6", timeSlot: "19:00", state: "can-do" as const },
+
+  // Alice's availability
+  { profileId: aliceProfileId, dayKey: "5", timeSlot: "18:00", state: "can-do" as const },
+  { profileId: aliceProfileId, dayKey: "5", timeSlot: "19:00", state: "can-do" as const },
+  { profileId: aliceProfileId, dayKey: "5", timeSlot: "20:00", state: "maybe" as const },
+  { profileId: aliceProfileId, dayKey: "4", timeSlot: "19:00", state: "can-do" as const },
+  { profileId: aliceProfileId, dayKey: "4", timeSlot: "20:00", state: "can-do" as const },
+
+  // Bob's availability
+  { profileId: bobProfileId, dayKey: "5", timeSlot: "19:00", state: "can-do" as const },
+  { profileId: bobProfileId, dayKey: "5", timeSlot: "20:00", state: "can-do" as const },
+  { profileId: bobProfileId, dayKey: "5", timeSlot: "21:00", state: "can-do" as const },
+  { profileId: bobProfileId, dayKey: "6", timeSlot: "19:00", state: "cant-do" as const },
+  { profileId: bobProfileId, dayKey: "6", timeSlot: "20:00", state: "maybe" as const },
+];
+
+for (const slot of recurringSlots) {
+  insert("selections", {
+    scheduleId: recurringScheduleId,
+    profileId: slot.profileId,
+    dayKey: slot.dayKey,
+    timeSlot: slot.timeSlot,
+    timezone: userTimezone,
+    state: slot.state,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Selections — one-off schedule (dayKey = ISO date)
+// ---------------------------------------------------------------------------
+
+const oneOffSlots = [
+  // Alice (creator)
+  { profileId: aliceProfileId, dayOffset: 2, timeSlot: "10:00", state: "can-do" as const },
+  { profileId: aliceProfileId, dayOffset: 2, timeSlot: "11:00", state: "can-do" as const },
+  { profileId: aliceProfileId, dayOffset: 3, timeSlot: "14:00", state: "can-do" as const },
+  { profileId: aliceProfileId, dayOffset: 3, timeSlot: "15:00", state: "can-do" as const },
+  { profileId: aliceProfileId, dayOffset: 5, timeSlot: "10:00", state: "maybe" as const },
+
+  // Bob
+  { profileId: bobProfileId, dayOffset: 2, timeSlot: "10:00", state: "can-do" as const },
+  { profileId: bobProfileId, dayOffset: 2, timeSlot: "11:00", state: "maybe" as const },
+  { profileId: bobProfileId, dayOffset: 3, timeSlot: "14:00", state: "cant-do" as const },
+  { profileId: bobProfileId, dayOffset: 4, timeSlot: "10:00", state: "can-do" as const },
+  { profileId: bobProfileId, dayOffset: 4, timeSlot: "11:00", state: "can-do" as const },
+];
+
+for (const slot of oneOffSlots) {
+  insert("selections", {
+    scheduleId: oneOffScheduleId,
+    profileId: slot.profileId,
+    dayKey: isoDate(slot.dayOffset),
+    timeSlot: slot.timeSlot,
+    timezone: "America/New_York",
+    state: slot.state,
+  });
+}
+
+// Export IDs so they can be referenced if needed
+export { designerProfileId, aliceProfileId, bobProfileId };
+export { recurringScheduleId, oneOffScheduleId };
