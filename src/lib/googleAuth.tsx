@@ -50,6 +50,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { getConfig } from "../config";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -57,7 +58,6 @@ import {
 
 const TOKEN_KEY = "whengames_google_token";
 const OAUTH_NONCE_KEY = "whengames_oauth_nonce";
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
 
 // ---------------------------------------------------------------------------
 // JWT helpers
@@ -100,7 +100,7 @@ function validateGoogleJwt(token: string): boolean {
     }
 
     // Audience must match our Google Client ID
-    if (payload.aud !== GOOGLE_CLIENT_ID) return false;
+    if (payload.aud !== getConfig().GOOGLE_CLIENT_ID) return false;
 
     // Token must not be expired
     if (typeof payload.exp !== "number" || payload.exp * 1000 < Date.now()) {
@@ -166,8 +166,7 @@ export function GoogleAuthProvider({
   }, [token]);
 
   const signIn = useCallback((redirectTo?: string) => {
-    const convexSiteUrl = import.meta.env.VITE_CONVEX_SITE_URL as string;
-    const redirectUri = `${convexSiteUrl}/auth/google/callback`;
+    const redirectUri = `${getConfig().CONVEX_SITE_URL}/auth/google/callback`;
     const path =
       redirectTo ??
       window.location.pathname + window.location.search + window.location.hash;
@@ -180,7 +179,7 @@ export function GoogleAuthProvider({
     const state = `${nonce}|${path}`;
 
     const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-    authUrl.searchParams.set("client_id", GOOGLE_CLIENT_ID);
+    authUrl.searchParams.set("client_id", getConfig().GOOGLE_CLIENT_ID);
     authUrl.searchParams.set("redirect_uri", redirectUri);
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set("scope", "openid profile email");

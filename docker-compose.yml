@@ -1,11 +1,10 @@
 services:
   when:
-    build:
-      context: .
-      args:
-        VITE_CONVEX_URL: ${VITE_CONVEX_URL}
-        VITE_CONVEX_SITE_URL: ${VITE_CONVEX_SITE_URL}
-        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID}
+    build: .
     ports:
       - "3000:80"
+    environment:
+      - CONVEX_URL=${CONVEX_URL}
+      - CONVEX_SITE_URL=${CONVEX_SITE_URL}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
     restart: unless-stopped

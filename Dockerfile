@@ -15,15 +15,7 @@ RUN pnpm install --frozen-lockfile
 # Copy source
 COPY . .
 
-# Build args (required at build time for the frontend bundle)
-ARG VITE_CONVEX_URL
-ARG VITE_CONVEX_SITE_URL
-ARG VITE_GOOGLE_CLIENT_ID
-ENV VITE_CONVEX_URL=$VITE_CONVEX_URL
-ENV VITE_CONVEX_SITE_URL=$VITE_CONVEX_SITE_URL
-ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
-
-# Build the application
+# Build the application (no VITE_* args needed — config is injected at runtime)
 RUN pnpm run build
 
 # Stage 2: Serve
@@ -35,7 +27,9 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 # Copy nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Expose port
+# Copy entrypoint that generates /config.json from env vars
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+
 EXPOSE 80
 
-CMD ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["/docker-entrypoint.sh"]

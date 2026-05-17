@@ -8,33 +8,32 @@ A real-time scheduling web app for coordinating availability between people. Sup
 - **Backend**: Convex (real-time BaaS)
 - **Auth**: Google OAuth (authorization code flow via Convex HTTP endpoint + native JWT verification)
 - **Timezone**: Luxon 3.7
-- **Deploy**: Docker + nginx
+- **Deploy**: Docker + nginx, or any static file server
 
-## Setup
+## Backend Setup (required for all deployment methods)
 
-### 1. Prerequisites
+Regardless of how you run the frontend, you need a Convex deployment and Google OAuth credentials. Complete these steps first.
 
-- Node.js 22+
-- A [Convex](https://convex.dev) account
-- A [Google Cloud Console](https://console.cloud.google.com) project with OAuth 2.0 credentials
+### 1. Create a Convex deployment
 
-### 2. Install dependencies
+Sign up at [convex.dev](https://convex.dev) and create a project. You can do this through the [dashboard](https://dashboard.convex.dev) or by running `npx convex dev` locally (which also generates types for development — see [Development](#development) below).
+
+After creating a deployment, note your two URLs from the dashboard under Settings > URL & Deploy Key:
+
+| URL | Looks like | Used for |
+|---|---|---|
+| **Convex URL** | `https://your-deployment.convex.cloud` | Frontend client connection |
+| **Convex Site URL** | `https://your-deployment.convex.site` | OAuth callback endpoint |
+
+### 2. Deploy the Convex backend
+
+If you haven't already pushed the backend functions to your deployment:
 
 ```bash
-pnpm install
+npx convex deploy
 ```
 
-### 3. Initialize Convex
-
-Run the Convex dev server to create/select a project and generate types:
-
-```bash
-npx convex dev
-```
-
-This creates `.env.local` with your `CONVEX_DEPLOYMENT` and `VITE_CONVEX_URL`. Leave this running or stop it for now (you'll start it again in step 6).
-
-### 4. Set up Google OAuth
+### 3. Set up Google OAuth
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
 2. Create an OAuth 2.0 Client ID (Web application type)
@@ -42,34 +41,78 @@ This creates `.env.local` with your `CONVEX_DEPLOYMENT` and `VITE_CONVEX_URL`. L
    ```
    https://<your-convex-deployment>.convex.site/auth/google/callback
    ```
-   Find your HTTP Actions URL in the [Convex dashboard](https://dashboard.convex.dev) under Settings > URL & Deploy Key.
-4. Set the Google credentials as Convex environment variables:
+4. Set the required Convex server-side environment variables:
 
 ```bash
 npx convex env set AUTH_GOOGLE_ID your_google_client_id
 npx convex env set AUTH_GOOGLE_SECRET your_google_client_secret
-npx convex env set SITE_URL http://localhost:5173
+npx convex env set SITE_URL https://your-frontend-domain.com
 ```
 
-5. Add the Google Client ID to your `.env.local` for the frontend:
+`SITE_URL` is where Google redirects users after login — set it to wherever you'll be serving the frontend (e.g. `http://localhost:5173` for development, `https://when.example.com` for production).
+
+You can view these variables with `npx convex env list` or in the [Convex dashboard](https://dashboard.convex.dev) under Settings > Environment Variables.
+
+### Environment variables summary
+
+| Variable | Where | Description |
+|---|---|---|
+| `AUTH_GOOGLE_ID` | Convex server env | Google OAuth 2.0 Client ID |
+| `AUTH_GOOGLE_SECRET` | Convex server env | Google OAuth 2.0 Client Secret |
+| `SITE_URL` | Convex server env | Frontend URL for OAuth callback redirect |
+
+The frontend also needs three values to connect to your backend. How you provide them depends on your deployment method — see below.
+
+| Value | Description |
+|---|---|
+| **Convex URL** | Your `https://xxx.convex.cloud` URL |
+| **Convex Site URL** | Your `https://xxx.convex.site` URL |
+| **Google Client ID** | Same value as `AUTH_GOOGLE_ID` above (this is a public value) |
+
+---
+
+## Development
+
+For contributors working on the codebase.
+
+### Prerequisites
+
+- Node.js 22+
+- pnpm
+
+### 1. Install dependencies
+
+```bash
+pnpm install
+```
+
+### 2. Initialize Convex
+
+```bash
+npx convex dev
+```
+
+This creates `.env.local` with your `CONVEX_DEPLOYMENT` and `VITE_CONVEX_URL`.
+
+### 3. Configure frontend env vars
+
+Add these to your `.env.local`:
 
 ```
-VITE_GOOGLE_CLIENT_ID=your_google_client_id
 VITE_CONVEX_SITE_URL=https://<your-convex-deployment>.convex.site
+VITE_GOOGLE_CLIENT_ID=your_google_client_id
 ```
 
-### 5. Run development server
-
-Start both the Convex backend and Vite frontend concurrently:
+### 4. Run the dev server
 
 ```bash
 pnpm dev
 ```
 
-Or run them separately:
+Or run Convex and Vite separately:
 
 ```bash
-# Terminal 1 — Convex backend
+# Terminal 1 — Convex backend (watches for changes, syncs functions)
 npx convex dev
 
 # Terminal 2 — Vite frontend
@@ -78,67 +121,136 @@ npx vite
 
 The app will be available at `http://localhost:5173`.
 
-### Environment variables summary
+---
 
-After setup, these environment variables should be configured:
+## Deployment
 
-| Variable | Where | Set by | Description |
-|---|---|---|---|
-| `CONVEX_DEPLOYMENT` | `.env.local` | `npx convex dev` | Convex deployment identifier |
-| `VITE_CONVEX_URL` | `.env.local` | `npx convex dev` | Convex cloud URL for the frontend client |
-| `VITE_CONVEX_SITE_URL` | `.env.local` | Manual | Convex HTTP actions URL (e.g. `https://xxx.convex.site`) |
-| `VITE_GOOGLE_CLIENT_ID` | `.env.local` | Manual | Google OAuth Client ID (public, embedded in frontend) |
-| `SITE_URL` | Convex server env | Manual | Frontend URL for OAuth callback redirect (e.g. `http://localhost:5173`) |
-| `AUTH_GOOGLE_ID` | Convex server env | Manual | Google OAuth 2.0 Client ID |
-| `AUTH_GOOGLE_SECRET` | Convex server env | Manual | Google OAuth 2.0 Client Secret |
+For users running a published build. Choose either Docker or static file serving.
 
-You can view the server-side variables with `npx convex env list` or in the [Convex dashboard](https://dashboard.convex.dev) under Settings > Environment Variables.
+### Option A: Docker
 
-## Docker Deployment
+The Docker image is **generic** — built once with no configuration baked in. Configuration is injected at runtime via environment variables, which are written to `/config.json` when the container starts.
 
-### Build and run
+#### Building and publishing the image (maintainers)
 
 ```bash
-# Set your Convex URL
-export VITE_CONVEX_URL=https://your-deployment.convex.cloud
-export VITE_CONVEX_SITE_URL=https://your-deployment.convex.site
-export VITE_GOOGLE_CLIENT_ID=your_google_client_id
+docker build -t whengames:latest .
 
-# Build and start
-docker compose up -d --build
+docker tag whengames:latest ghcr.io/yourorg/whengames:latest
+docker push ghcr.io/yourorg/whengames:latest
+```
+
+#### Running the image
+
+```bash
+docker pull ghcr.io/yourorg/whengames:latest
+
+docker run -d -p 3000:80 \
+  -e CONVEX_URL=https://your-deployment.convex.cloud \
+  -e CONVEX_SITE_URL=https://your-deployment.convex.site \
+  -e GOOGLE_CLIENT_ID=your_google_client_id \
+  ghcr.io/yourorg/whengames:latest
+```
+
+Or with docker-compose — create a `.env` file:
+
+```env
+CONVEX_URL=https://your-deployment.convex.cloud
+CONVEX_SITE_URL=https://your-deployment.convex.site
+GOOGLE_CLIENT_ID=your_google_client_id
+```
+
+```bash
+docker compose up -d
 ```
 
 The app will be available at `http://localhost:3000`.
 
-### Production deployment
+#### Changing configuration
 
-When deploying to production, update `SITE_URL` to your production frontend URL:
-
-```bash
-npx convex env set --prod SITE_URL https://your-production-domain.com
-```
-
-And update the Google OAuth redirect URI in the Cloud Console to:
-```
-https://<your-prod-convex-deployment>.convex.site/auth/google/callback
-```
-
-Then build and deploy:
+Update your environment variables and restart the container. No rebuild needed — the entrypoint regenerates `/config.json` on every start.
 
 ```bash
-# Deploy Convex backend
-npx convex deploy
+# docker run — stop the old container and start a new one with new -e values
 
-# Build Docker image
-docker build \
-  --build-arg VITE_CONVEX_URL=https://your-production.convex.cloud \
-  --build-arg VITE_CONVEX_SITE_URL=https://your-production.convex.site \
-  --build-arg VITE_GOOGLE_CLIENT_ID=your_google_client_id \
-  -t when .
-
-# Run
-docker run -p 80:80 when
+# docker-compose — edit .env, then:
+docker compose up -d
 ```
+
+### Option B: Static file server (no Docker)
+
+If you already have nginx, caddy, apache, or another web server, you can serve the built files directly.
+
+#### 1. Build
+
+```bash
+pnpm install
+pnpm run build
+```
+
+This produces a `dist/` directory.
+
+#### 2. Generate config.json
+
+Create `dist/config.json` with your values:
+
+```bash
+cat > dist/config.json <<EOF
+{
+  "CONVEX_URL": "https://your-deployment.convex.cloud",
+  "CONVEX_SITE_URL": "https://your-deployment.convex.site",
+  "GOOGLE_CLIENT_ID": "your_google_client_id"
+}
+EOF
+```
+
+#### 3. Serve
+
+Point your web server at the `dist/` directory. The only requirement is an SPA fallback — all routes that don't match a real file must return `index.html` so React Router works.
+
+**nginx** — add to your server block:
+
+```nginx
+root /path/to/dist;
+index index.html;
+
+location / {
+    try_files $uri $uri/ /index.html;
+}
+```
+
+**Caddy:**
+
+```
+your-domain.com {
+    root * /path/to/dist
+    try_files {path} /index.html
+    file_server
+}
+```
+
+#### 4. Changing configuration
+
+Edit `dist/config.json` and reload the page. No rebuild needed.
+
+### Production checklist
+
+When going to production, make sure:
+
+1. **`SITE_URL`** on Convex points to your production frontend URL:
+   ```bash
+   npx convex env set --prod SITE_URL https://your-production-domain.com
+   ```
+
+2. **Google OAuth redirect URI** in the Cloud Console includes your production callback:
+   ```
+   https://<your-prod-convex-deployment>.convex.site/auth/google/callback
+   ```
+
+3. **Convex backend** is deployed:
+   ```bash
+   npx convex deploy
+   ```
 
 ## Architecture
 
@@ -203,6 +315,7 @@ convex/
   dstNotifications.ts    - DST impact calculation (placeholder email)
 
 src/
+  config.ts              - Runtime configuration loader (fetches /config.json or falls back to env vars)
   lib/
     googleAuth.tsx       - Google auth context, provider, and hooks
     timezone.ts          - Timezone conversion utilities
