@@ -72,7 +72,7 @@ function schedulesGet(args: Args) {
     .query("availabilityLinks")
     .filter((l) => l.scheduleId === args.scheduleId);
 
-  const linkedProfileIds = new Set(links.map((l: { profileId: string }) => l.profileId));
+  const linkedProfileIds = new Set(links.map((l) => l.profileId));
 
   // Filter out non-exception selections for linked profiles
   let filteredSelections = allSelections;
