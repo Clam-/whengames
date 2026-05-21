@@ -134,22 +134,22 @@ The Docker image is **generic** — built once with no configuration baked in. C
 #### Building and publishing the image (maintainers)
 
 ```bash
-docker build -t whengames:latest .
+docker build -t when:latest .
 
-docker tag whengames:latest ghcr.io/yourorg/whengames:latest
-docker push ghcr.io/yourorg/whengames:latest
+docker tag when:latest ghcr.io/whenwhenwhenwhenwhen/when:latest
+docker push ghcr.io/whenwhenwhenwhenwhen/when:latest
 ```
 
 #### Running the image
 
 ```bash
-docker pull ghcr.io/yourorg/whengames:latest
+docker pull ghcr.io/whenwhenwhenwhenwhen/when:latest
 
 docker run -d -p 3000:80 \
   -e CONVEX_URL=https://your-deployment.convex.cloud \
   -e CONVEX_SITE_URL=https://your-deployment.convex.site \
   -e GOOGLE_CLIENT_ID=your_google_client_id \
-  ghcr.io/yourorg/whengames:latest
+  ghcr.io/whenwhenwhenwhenwhen/when:latest
 ```
 
 Or with docker-compose — create a `.env` file:
