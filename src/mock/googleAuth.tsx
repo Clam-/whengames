@@ -12,6 +12,7 @@ import { type ReactNode } from "react";
 // ---------------------------------------------------------------------------
 
 export const TOKEN_KEY = "whengames_google_token";
+export const SESSION_KEY = "whengames_session_token";
 export const OAUTH_NONCE_KEY = "whengames_oauth_nonce";
 export function validateGoogleJwt(_token: string) {
   return false;
@@ -40,6 +41,7 @@ export function useGoogleAuth() {
     signOut: () => {
       console.log("[mock] signOut called — no-op in design mode");
     },
+    refreshAuth: async () => null as string | null,
   };
 }
 

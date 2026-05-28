@@ -484,11 +484,12 @@ export const setDisallowedSlots = mutation({
   },
 });
 
-// Lock in time slots (creator only)
+// Lock in time slots (creator, lock editors, or anyone if anyoneCanLock)
 // Filters out any slots that are currently disallowed.
 export const setLockedSlots = mutation({
   args: {
     scheduleId: v.id("schedules"),
+    callerProfileId: v.optional(v.id("userProfiles")),
     slots: v.array(
       v.object({
         dayKey: v.string(),
@@ -499,6 +500,12 @@ export const setLockedSlots = mutation({
   handler: async (ctx, args) => {
     const schedule = await ctx.db.get(args.scheduleId);
     if (!schedule) return;
+
+    if (args.callerProfileId) {
+      const isCreator = schedule.creatorProfileId === args.callerProfileId;
+      const isLockEditor = schedule.lockEditors?.includes(args.callerProfileId);
+      if (!isCreator && !schedule.anyoneCanLock && !isLockEditor) return;
+    }
 
     // Strip any disallowed slots from the lock request
     const disallowedKeys = new Set(
@@ -562,6 +569,14 @@ export const removeParticipant = mutation({
     profileId: v.id("userProfiles"),
   },
   handler: async (ctx, args) => {
+    // Remove from lock editors if present
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (schedule?.lockEditors?.includes(args.profileId)) {
+      await ctx.db.patch(args.scheduleId, {
+        lockEditors: schedule.lockEditors.filter((id) => id !== args.profileId),
+      });
+    }
+
     // Unlink any saved availability
     const link = await ctx.db
       .query("availabilityLinks")
@@ -599,6 +614,14 @@ export const blockParticipant = mutation({
     profileId: v.id("userProfiles"),
   },
   handler: async (ctx, args) => {
+    // Remove from lock editors if present
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (schedule?.lockEditors?.includes(args.profileId)) {
+      await ctx.db.patch(args.scheduleId, {
+        lockEditors: schedule.lockEditors.filter((id) => id !== args.profileId),
+      });
+    }
+
     // Check if already blocked
     const existing = await ctx.db
       .query("blockedProfiles")
@@ -693,18 +716,77 @@ export const getBlockedProfiles = query({
   },
 });
 
-// Clear locked time slots (creator lock mode)
+// Clear locked time slots (creator, lock editors, or anyone if anyoneCanLock)
 export const clearLockedSlots = mutation({
   args: {
     scheduleId: v.id("schedules"),
+    callerProfileId: v.optional(v.id("userProfiles")),
+  },
+  handler: async (ctx, args) => {
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (!schedule) return;
+
+    if (args.callerProfileId) {
+      const isCreator = schedule.creatorProfileId === args.callerProfileId;
+      const isLockEditor = schedule.lockEditors?.includes(args.callerProfileId);
+      if (!isCreator && !schedule.anyoneCanLock && !isLockEditor) return;
+    }
+
+    await ctx.db.patch(args.scheduleId, {
+      lockedSlots: [],
+      isLocked: false,
+    });
+  },
+});
+
+// Toggle "anyone can lock" setting (creator only)
+export const setAnyoneCanLock = mutation({
+  args: {
+    scheduleId: v.id("schedules"),
+    anyoneCanLock: v.boolean(),
   },
   handler: async (ctx, args) => {
     const schedule = await ctx.db.get(args.scheduleId);
     if (!schedule) return;
 
     await ctx.db.patch(args.scheduleId, {
-      lockedSlots: [],
-      isLocked: false,
+      anyoneCanLock: args.anyoneCanLock || undefined,
+    });
+  },
+});
+
+// Promote a participant to lock editor (creator only)
+export const addLockEditor = mutation({
+  args: {
+    scheduleId: v.id("schedules"),
+    profileId: v.id("userProfiles"),
+  },
+  handler: async (ctx, args) => {
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (!schedule) return;
+
+    const editors = schedule.lockEditors || [];
+    if (editors.includes(args.profileId)) return;
+
+    await ctx.db.patch(args.scheduleId, {
+      lockEditors: [...editors, args.profileId],
+    });
+  },
+});
+
+// Demote a participant from lock editor (creator only)
+export const removeLockEditor = mutation({
+  args: {
+    scheduleId: v.id("schedules"),
+    profileId: v.id("userProfiles"),
+  },
+  handler: async (ctx, args) => {
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (!schedule) return;
+
+    const editors = schedule.lockEditors || [];
+    await ctx.db.patch(args.scheduleId, {
+      lockEditors: editors.filter((id) => id !== args.profileId),
     });
   },
 });

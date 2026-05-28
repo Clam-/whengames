@@ -49,6 +49,9 @@ export function ScheduleView() {
   const clearLockedSlots = useMutation(api.schedules.clearLockedSlots);
   const clearSelections = useMutation(api.selections.clearForProfile);
   const setAcceptParticipation = useMutation(api.schedules.setAcceptParticipation);
+  const setAnyoneCanLock = useMutation(api.schedules.setAnyoneCanLock);
+  const addLockEditor = useMutation(api.schedules.addLockEditor);
+  const removeLockEditor = useMutation(api.schedules.removeLockEditor);
   const removeParticipant = useMutation(api.schedules.removeParticipant);
   const blockParticipant = useMutation(api.schedules.blockParticipant);
 
@@ -86,6 +89,13 @@ export function ScheduleView() {
   // Check if current user is the creator
   const isCreator = profile && schedule
     ? schedule.creatorProfileId === profile._id
+    : false;
+
+  // Check if user can lock (creator, promoted lock editor, or anyone if toggle is on)
+  const canLock = profile && schedule
+    ? isCreator
+      || !!schedule.anyoneCanLock
+      || !!(schedule.lockEditors as string[] | undefined)?.includes(profile._id as string)
     : false;
 
   // Default to "limit" mode for creators
@@ -210,22 +220,22 @@ export function ScheduleView() {
 
   const handleCreatorSlotChange = useCallback(
     async (slots: { dayKey: string; timeSlot: string }[]) => {
-      if (!isCreator || !schedule) return;
+      if (!schedule) return;
 
-      if (creatorMode === "limit") {
+      if (isCreator && creatorMode === "limit") {
         await setDisallowedSlots({
           scheduleId: schedule._id,
           slots,
         });
-      } else if (creatorMode === "lock") {
+      } else if (canLock && creatorMode === "lock") {
         await setLockedSlots({
           scheduleId: schedule._id,
+          callerProfileId: profile!._id,
           slots,
         });
       }
-      // nominate mode: handled through regular cell changes
     },
-    [isCreator, schedule, creatorMode, setDisallowedSlots, setLockedSlots]
+    [isCreator, canLock, schedule, profile, creatorMode, setDisallowedSlots, setLockedSlots]
   );
 
   // Availability handlers
@@ -300,6 +310,39 @@ export function ScheduleView() {
     [schedule, setAcceptParticipation]
   );
 
+  const handleToggleAnyoneCanLock = useCallback(
+    async (enabled: boolean) => {
+      if (!schedule) return;
+      await setAnyoneCanLock({
+        scheduleId: schedule._id,
+        anyoneCanLock: enabled,
+      });
+    },
+    [schedule, setAnyoneCanLock]
+  );
+
+  const handlePromoteLockEditor = useCallback(
+    async (profileId: Id<"userProfiles">) => {
+      if (!schedule) return;
+      await addLockEditor({
+        scheduleId: schedule._id,
+        profileId,
+      });
+    },
+    [schedule, addLockEditor]
+  );
+
+  const handleDemoteLockEditor = useCallback(
+    async (profileId: Id<"userProfiles">) => {
+      if (!schedule) return;
+      await removeLockEditor({
+        scheduleId: schedule._id,
+        profileId,
+      });
+    },
+    [schedule, removeLockEditor]
+  );
+
   const handleDeleteParticipant = useCallback(
     async (profileId: Id<"userProfiles">) => {
       if (!schedule) return;
@@ -345,6 +388,13 @@ export function ScheduleView() {
 
   // Clear modal content based on role and creator mode
   const getClearModalContent = () => {
+    if (canLock && creatorMode === "lock") {
+      return {
+        title: "Clear Locked Times",
+        message:
+          "Are you sure you want to clear all locked-in times? The schedule will be unlocked.",
+      };
+    }
     if (!isCreator) {
       return {
         title: "Clear Nominations",
@@ -365,12 +415,6 @@ export function ScheduleView() {
           message:
             "Are you sure you want to clear all your nominations for this schedule? This cannot be undone.",
         };
-      case "lock":
-        return {
-          title: "Clear Locked Times",
-          message:
-            "Are you sure you want to clear all locked-in times? The schedule will be unlocked.",
-        };
       default:
         return {
           title: "Clear",
@@ -382,14 +426,14 @@ export function ScheduleView() {
   const handleClear = useCallback(async () => {
     if (!profile || !schedule) return;
 
-    if (!isCreator) {
-      // Non-creator: clear their own nominations
+    if (canLock && creatorMode === "lock") {
+      await clearLockedSlots({ scheduleId: schedule._id, callerProfileId: profile._id });
+    } else if (!isCreator) {
       await clearSelections({
         scheduleId: schedule._id,
         profileId: profile._id,
       });
     } else {
-      // Creator: clear based on current mode
       switch (creatorMode) {
         case "limit":
           await clearDisallowedSlots({ scheduleId: schedule._id });
@@ -400,15 +444,13 @@ export function ScheduleView() {
             profileId: profile._id,
           });
           break;
-        case "lock":
-          await clearLockedSlots({ scheduleId: schedule._id });
-          break;
       }
     }
   }, [
     profile,
     schedule,
     isCreator,
+    canLock,
     creatorMode,
     clearSelections,
     clearDisallowedSlots,
@@ -666,6 +708,20 @@ export function ScheduleView() {
             </div>
           )}
 
+          {/* Lock In Time toggle for non-creator lock editors */}
+          {!isCreator && canLock && (
+            <button
+              onClick={() => setCreatorMode(creatorMode === "lock" ? null : "lock")}
+              className={`text-xs px-2 py-1 rounded ml-auto ${
+                creatorMode === "lock"
+                  ? "bg-purple-100 text-purple-700 font-medium dark:bg-violet-900/40 dark:text-violet-400"
+                  : "text-gray-500 hover:bg-gray-100 dark:text-slate-400 dark:hover:bg-slate-700"
+              }`}
+            >
+              Lock In Time
+            </button>
+          )}
+
           {/* Accept Participation toggle (creator only) */}
           {isCreator && schedule && (
             <div className="flex items-center gap-2">
@@ -700,6 +756,38 @@ export function ScheduleView() {
             </div>
           )}
 
+          {/* Anyone Can Lock toggle (creator only) */}
+          {isCreator && schedule && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-gray-600 dark:text-slate-400 whitespace-nowrap">
+                Anyone Can Lock:
+              </label>
+              <button
+                onClick={() =>
+                  handleToggleAnyoneCanLock(!schedule.anyoneCanLock)
+                }
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1 ${
+                  schedule.anyoneCanLock
+                    ? "bg-purple-500 dark:bg-violet-500"
+                    : "bg-gray-300 dark:bg-slate-600"
+                }`}
+                title={
+                  schedule.anyoneCanLock
+                    ? "Anyone can lock in times. Click to restrict."
+                    : "Only the creator and promoted users can lock in times. Click to allow anyone."
+                }
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform shadow-sm ${
+                    schedule.anyoneCanLock
+                      ? "translate-x-4.5"
+                      : "translate-x-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+          )}
+
           {/* Participants menu (creator only) */}
           {isCreator && schedule && (() => {
             // Get participants (profiles that have selections, excluding creator)
@@ -710,11 +798,14 @@ export function ScheduleView() {
               <ParticipantsMenu
                 participants={participantProfiles}
                 availabilityLinks={schedule.availabilityLinks || []}
+                lockEditors={(schedule.lockEditors as string[] | undefined) || []}
                 editingProfileId={editingProfileId}
                 onEditUser={handleEditParticipant}
                 onStopEditing={handleStopEditingParticipant}
                 onDeleteUser={handleDeleteParticipant}
                 onBlockUser={handleBlockParticipant}
+                onPromoteLockEditor={handlePromoteLockEditor}
+                onDemoteLockEditor={handleDemoteLockEditor}
               />
             ) : null;
           })()}
@@ -792,6 +883,7 @@ export function ScheduleView() {
           weekOffset={weekOffset}
           canInteract={canInteract || !!editingProfileId}
           isCreator={!!isCreator}
+          canLock={!!canLock}
           creatorMode={editingProfileId ? "nominate" : creatorMode}
           onCellChange={handleCellChange}
           onBatchChange={handleBatchChange}

@@ -52,6 +52,8 @@ export default defineSchema({
       )
     ),
     isLocked: v.optional(v.boolean()),
+    anyoneCanLock: v.optional(v.boolean()),
+    lockEditors: v.optional(v.array(v.id("userProfiles"))),
     isPrivate: v.optional(v.boolean()),
     acceptParticipation: v.optional(v.boolean()), // undefined/true = open, false = closed
     createdAt: v.number(),
@@ -118,6 +120,16 @@ export default defineSchema({
     .index("by_scheduleId", ["scheduleId"])
     .index("by_savedAvailability", ["savedAvailabilityId"])
     .index("by_profileId", ["profileId"]),
+
+  // Server-side auth sessions (stores Google refresh tokens for silent token renewal)
+  authSessions: defineTable({
+    sessionToken: v.string(),
+    refreshToken: v.string(),
+    googleUserId: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_sessionToken", ["sessionToken"])
+    .index("by_googleUserId", ["googleUserId"]),
 
   // DST notification check log
   dstCheckLog: defineTable({

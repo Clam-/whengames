@@ -17,21 +17,27 @@ interface AvailabilityLink {
 interface Props {
   participants: Participant[];
   availabilityLinks: AvailabilityLink[];
+  lockEditors: string[];
   editingProfileId: Id<"userProfiles"> | null;
   onEditUser: (profileId: Id<"userProfiles">) => void;
   onStopEditing: () => void;
   onDeleteUser: (profileId: Id<"userProfiles">) => void;
   onBlockUser: (profileId: Id<"userProfiles">) => void;
+  onPromoteLockEditor: (profileId: Id<"userProfiles">) => void;
+  onDemoteLockEditor: (profileId: Id<"userProfiles">) => void;
 }
 
 export function ParticipantsMenu({
   participants,
   availabilityLinks,
+  lockEditors,
   editingProfileId,
   onEditUser,
   onStopEditing,
   onDeleteUser,
   onBlockUser,
+  onPromoteLockEditor,
+  onDemoteLockEditor,
 }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
@@ -204,6 +210,7 @@ export function ParticipantsMenu({
             {participants.map((participant) => {
               const isLinked = hasLinkedAvailability(participant._id);
               const isCurrentlyEditing = editingProfileId === participant._id;
+              const isLockEditor = lockEditors.includes(participant._id as string);
 
               return (
                 <div
@@ -240,10 +247,64 @@ export function ParticipantsMenu({
                         *
                       </span>
                     )}
+                    {isLockEditor && (
+                      <span
+                        className="ml-1 text-purple-500 dark:text-violet-400"
+                        title="Can lock in times"
+                      >
+                        <svg className="w-3 h-3 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                      </span>
+                    )}
                   </span>
 
                   {/* Action icons */}
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    {/* Promote/Demote lock editor */}
+                    <button
+                      onClick={() => {
+                        if (isLockEditor) {
+                          onDemoteLockEditor(participant._id);
+                        } else {
+                          onPromoteLockEditor(participant._id);
+                        }
+                      }}
+                      className={`p-1 rounded transition-colors ${
+                        isLockEditor
+                          ? "text-purple-600 hover:text-purple-800 hover:bg-purple-50 dark:text-violet-400 dark:hover:text-violet-300 dark:hover:bg-violet-900/30"
+                          : "text-gray-400 hover:text-purple-600 hover:bg-purple-50 dark:text-slate-500 dark:hover:text-violet-400 dark:hover:bg-violet-900/30"
+                      }`}
+                      title={
+                        isLockEditor
+                          ? `Revoke ${participant.displayName}'s lock-in permission`
+                          : `Allow ${participant.displayName} to lock in times`
+                      }
+                    >
+                      <svg
+                        className="w-3.5 h-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        {isLockEditor ? (
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"
+                          />
+                        ) : (
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                          />
+                        )}
+                      </svg>
+                    </button>
+
                     {/* Edit */}
                     <button
                       onClick={() => {

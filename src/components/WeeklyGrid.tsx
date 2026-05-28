@@ -48,6 +48,8 @@ interface Schedule {
   disallowedSlots?: { dayKey: string; timeSlot: string }[];
   lockedSlots?: { dayKey: string; timeSlot: string }[];
   isLocked?: boolean;
+  anyoneCanLock?: boolean;
+  lockEditors?: Id<"userProfiles">[];
 }
 
 interface Props {
@@ -60,6 +62,7 @@ interface Props {
   weekOffset: number;
   canInteract: boolean;
   isCreator: boolean;
+  canLock: boolean;
   creatorMode: CreatorMode;
   onCellChange: (
     dayKey: string,
@@ -114,6 +117,7 @@ export function WeeklyGrid({
   weekOffset,
   canInteract,
   isCreator,
+  canLock,
   creatorMode,
   onCellChange,
   onBatchChange,
@@ -413,7 +417,7 @@ export function WeeklyGrid({
       }
 
       // Creator: Lock mode
-      if (isCreator && creatorMode === "lock") {
+      if (canLock && creatorMode === "lock") {
         const currentSlots = schedule.lockedSlots || [];
         const cellIsLocked = lockedSet.has(slotKey);
 
@@ -450,6 +454,7 @@ export function WeeklyGrid({
       schedule.dateRangeEnd,
       weekDates,
       isCreator,
+      canLock,
       creatorMode,
       selectMode,
       allowMode,
@@ -488,7 +493,7 @@ export function WeeklyGrid({
         } else {
           dragActionRef.current = allowMode;
         }
-      } else if (isCreator && creatorMode === "lock") {
+      } else if (canLock && creatorMode === "lock") {
         const cellIsLocked = isCellLocked(dayIndex, timeIndex);
         dragActionRef.current = cellIsLocked ? "unlock" : "lock";
       } else {
@@ -514,6 +519,7 @@ export function WeeklyGrid({
       getCellState,
       selectMode,
       isCreator,
+      canLock,
       creatorMode,
       allowMode,
       isCellDisallowed,
@@ -587,7 +593,7 @@ export function WeeklyGrid({
               }
             }
             onCreatorSlotChange(currentSlots);
-          } else if (isCreator && creatorMode === "lock") {
+          } else if (canLock && creatorMode === "lock") {
             // Lock mode: filter out disallowed cells first
             const allowedCells = selectedCells.filter(
               (cell) => !isCellDisallowed(cell.dayIndex, cell.timeIndex)
@@ -674,6 +680,7 @@ export function WeeklyGrid({
     toStorageKeys,
     onBatchChange,
     isCreator,
+    canLock,
     creatorMode,
     onCreatorSlotChange,
     isCellDisallowed,
@@ -755,11 +762,11 @@ export function WeeklyGrid({
       if (!isCellInDragSelection(dayIndex, timeIndex)) return "";
 
       if (isCreator && creatorMode === "limit") return "drag-select-limit";
-      if (isCreator && creatorMode === "lock") return "drag-select-lock";
+      if (canLock && creatorMode === "lock") return "drag-select-lock";
       // nominate mode or non-creator
       return "bg-blue-100 dark:bg-cyan-900/40";
     },
-    [isCellInDragSelection, isCreator, creatorMode]
+    [isCellInDragSelection, isCreator, canLock, creatorMode]
   );
 
   // Profile map for quick lookup
@@ -812,9 +819,9 @@ export function WeeklyGrid({
   // Determine the CSS class for the selection box overlay
   const selectionBoxClass = useMemo(() => {
     if (isCreator && creatorMode === "limit") return "selection-box limit";
-    if (isCreator && creatorMode === "lock") return "selection-box lock";
+    if (canLock && creatorMode === "lock") return "selection-box lock";
     return "selection-box";
-  }, [isCreator, creatorMode]);
+  }, [isCreator, canLock, creatorMode]);
 
   return (
     <div className="relative">

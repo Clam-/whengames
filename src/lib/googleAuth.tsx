@@ -19,11 +19,24 @@
  *    garbage, expired, or misrouted tokens — but is NOT a substitute for
  *    server-side verification.
  *
- * The token is stored in `localStorage`. This is the standard approach for
- * SPAs that use `ConvexProviderWithAuth` (the token must be available to JS
- * for the `fetchAccessToken` callback). The main risk is XSS exfiltration,
- * mitigated by:
- *   - Short token lifetime (~1 hour, set by Google)
+ * **Session persistence**
+ * On login, the Convex backend exchanges the OAuth code for tokens. If Google
+ * returns a refresh token it is stored **server-side only** in the
+ * `authSessions` table — it never leaves the backend. The client receives an
+ * opaque session token (random UUID) which it stores in `localStorage`. When
+ * the short-lived ID token (~1 hour) expires, the client sends its session
+ * token to `/auth/refresh`; the backend uses the stored refresh token to
+ * obtain a new ID token from Google and returns **only the ID token**.
+ *
+ * The refresh token is never included in any HTTP response, URL fragment, or
+ * client-accessible storage. It is only used inside Convex HTTP actions.
+ *
+ * **Token storage**
+ * The ID token and session token are stored in `localStorage`. This is the
+ * standard approach for SPAs that use `ConvexProviderWithAuth`. The main risk
+ * is XSS exfiltration, mitigated by:
+ *   - Short ID token lifetime (~1 hour, set by Google)
+ *   - Session token is an opaque UUID with no embedded secrets
  *   - No refresh tokens stored client-side
  *   - CSP headers in production (recommended)
  *
@@ -57,18 +70,17 @@ import { getConfig } from "../config";
 // ---------------------------------------------------------------------------
 
 const TOKEN_KEY = "whengames_google_token";
+const SESSION_KEY = "whengames_session_token";
 const OAUTH_NONCE_KEY = "whengames_oauth_nonce";
 
 // ---------------------------------------------------------------------------
 // JWT helpers
 // ---------------------------------------------------------------------------
 
-/** Base64url → string (handles the URL-safe alphabet used by JWTs). */
 function decodeBase64Url(str: string): string {
   return atob(str.replace(/-/g, "+").replace(/_/g, "/"));
 }
 
-/** Decode a JWT payload without signature verification. */
 function decodeJwtPart(part: string): Record<string, unknown> {
   return JSON.parse(decodeBase64Url(part));
 }
@@ -77,8 +89,7 @@ function decodeJwtPart(part: string): Record<string, unknown> {
  * Client-side validation of a Google ID token's structure and claims.
  *
  * This is defense-in-depth. The authoritative verification happens server-side
- * in Convex using Google's public JWKS keys. This function catches obviously
- * invalid, expired, or misrouted tokens before they reach localStorage.
+ * in Convex using Google's public JWKS keys.
  */
 function validateGoogleJwt(token: string): boolean {
   try {
@@ -88,10 +99,8 @@ function validateGoogleJwt(token: string): boolean {
     const header = decodeJwtPart(parts[0]);
     const payload = decodeJwtPart(parts[1]);
 
-    // Google signs ID tokens with RS256
     if (header.alg !== "RS256") return false;
 
-    // Issuer must be Google
     if (
       payload.iss !== "https://accounts.google.com" &&
       payload.iss !== "accounts.google.com"
@@ -99,21 +108,71 @@ function validateGoogleJwt(token: string): boolean {
       return false;
     }
 
-    // Audience must match our Google Client ID
     if (payload.aud !== getConfig().GOOGLE_CLIENT_ID) return false;
 
-    // Token must not be expired
     if (typeof payload.exp !== "number" || payload.exp * 1000 < Date.now()) {
       return false;
     }
 
-    // Subject (Google user ID) must be present
     if (typeof payload.sub !== "string" || !payload.sub) return false;
 
     return true;
   } catch {
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Silent token refresh (server-side refresh token, client never sees it)
+// ---------------------------------------------------------------------------
+
+let refreshPromise: Promise<string | null> | null = null;
+
+/**
+ * Call the backend `/auth/refresh` endpoint with the opaque session token.
+ * The backend uses the stored refresh token internally and returns only a
+ * fresh Google ID token. The refresh token never appears in the response.
+ */
+async function refreshIdToken(): Promise<string | null> {
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = (async () => {
+    try {
+      const sessionToken = localStorage.getItem(SESSION_KEY);
+      if (!sessionToken) return null;
+
+      const response = await fetch(
+        `${getConfig().CONVEX_SITE_URL}/auth/refresh`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionToken }),
+        },
+      );
+
+      if (response.status === 401) {
+        localStorage.removeItem(SESSION_KEY);
+        localStorage.removeItem(TOKEN_KEY);
+        return null;
+      }
+
+      if (!response.ok) return null;
+
+      const data = (await response.json()) as { idToken?: string };
+      if (data.idToken && validateGoogleJwt(data.idToken)) {
+        localStorage.setItem(TOKEN_KEY, data.idToken);
+        return data.idToken;
+      }
+
+      return null;
+    } catch {
+      return null;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +185,7 @@ interface GoogleAuthContextType {
   token: string | null;
   signIn: (redirectTo?: string) => void;
   signOut: () => void;
+  refreshAuth: () => Promise<string | null>;
 }
 
 const GoogleAuthContext = createContext<GoogleAuthContextType>({
@@ -134,6 +194,7 @@ const GoogleAuthContext = createContext<GoogleAuthContextType>({
   token: null,
   signIn: () => {},
   signOut: () => {},
+  refreshAuth: async () => null,
 });
 
 // ---------------------------------------------------------------------------
@@ -148,22 +209,71 @@ export function GoogleAuthProvider({
   const [token, setToken] = useState<string | null>(() => {
     const stored = localStorage.getItem(TOKEN_KEY);
     if (stored && validateGoogleJwt(stored)) return stored;
-    // Purge invalid / expired tokens on startup
     if (stored) localStorage.removeItem(TOKEN_KEY);
     return null;
   });
 
-  // Periodically check whether the stored token has expired or been tampered
+  const [isLoading, setIsLoading] = useState(() => {
+    const stored = localStorage.getItem(TOKEN_KEY);
+    const hasValidToken = stored !== null && validateGoogleJwt(stored);
+    const hasSession = localStorage.getItem(SESSION_KEY) !== null;
+    return !hasValidToken && hasSession;
+  });
+
+  // On mount: if we have a session but no valid token, silently refresh
   useEffect(() => {
-    if (!token) return;
-    const interval = setInterval(() => {
-      if (!validateGoogleJwt(token)) {
-        localStorage.removeItem(TOKEN_KEY);
-        setToken(null);
+    if (token || !localStorage.getItem(SESSION_KEY)) return;
+
+    refreshIdToken().then((newToken) => {
+      if (newToken) {
+        setToken(newToken);
       }
-    }, 60_000); // every 60 s
-    return () => clearInterval(interval);
+      setIsLoading(false);
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Proactively refresh 5 minutes before the ID token expires
+  useEffect(() => {
+    if (!token || !localStorage.getItem(SESSION_KEY)) return;
+
+    try {
+      const parts = token.split(".");
+      const payload = decodeJwtPart(parts[1]);
+      if (typeof payload.exp !== "number") return;
+
+      const msUntilExpiry = payload.exp * 1000 - Date.now();
+      const refreshIn = msUntilExpiry - 5 * 60 * 1000;
+
+      if (refreshIn <= 0) {
+        refreshIdToken().then((newToken) => {
+          if (newToken) setToken(newToken);
+        });
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        refreshIdToken().then((newToken) => {
+          if (newToken) setToken(newToken);
+        });
+      }, refreshIn);
+
+      return () => clearTimeout(timeout);
+    } catch {
+      // Malformed token — ignore, fetchAccessToken will handle it
+    }
   }, [token]);
+
+  const refreshAuth = useCallback(async () => {
+    const newToken = await refreshIdToken();
+    if (newToken) {
+      setToken(newToken);
+      return newToken;
+    }
+    if (!localStorage.getItem(SESSION_KEY)) {
+      setToken(null);
+    }
+    return null;
+  }, []);
 
   const signIn = useCallback((redirectTo?: string) => {
     const redirectUri = `${getConfig().CONVEX_SITE_URL}/auth/google/callback`;
@@ -171,9 +281,6 @@ export function GoogleAuthProvider({
       redirectTo ??
       window.location.pathname + window.location.search + window.location.hash;
 
-    // CSRF protection: embed a random nonce in the OAuth state parameter and
-    // store it in sessionStorage. The callback page verifies the nonce before
-    // accepting the token, preventing session-fixation attacks.
     const nonce = crypto.randomUUID();
     sessionStorage.setItem(OAUTH_NONCE_KEY, nonce);
     const state = `${nonce}|${path}`;
@@ -184,24 +291,27 @@ export function GoogleAuthProvider({
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set("scope", "openid profile email");
     authUrl.searchParams.set("state", state);
+    authUrl.searchParams.set("access_type", "offline");
 
     window.location.href = authUrl.toString();
   }, []);
 
   const signOut = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(SESSION_KEY);
     setToken(null);
   }, []);
 
   const value = useMemo<GoogleAuthContextType>(
     () => ({
-      isLoading: false, // no async script to load
+      isLoading,
       isAuthenticated: !!token,
       token,
       signIn,
       signOut,
+      refreshAuth,
     }),
-    [token, signIn, signOut],
+    [isLoading, token, signIn, signOut, refreshAuth],
   );
 
   return (
@@ -215,7 +325,6 @@ export function GoogleAuthProvider({
 // Hooks
 // ---------------------------------------------------------------------------
 
-/** General-purpose hook for components that need auth state & actions. */
 export function useGoogleAuth() {
   return useContext(GoogleAuthContext);
 }
@@ -225,21 +334,18 @@ export function useGoogleAuth() {
  * Returns `{ isLoading, isAuthenticated, fetchAccessToken }`.
  */
 export function useConvexGoogleAuth() {
-  const { isLoading, isAuthenticated, token } = useGoogleAuth();
+  const { isLoading, isAuthenticated, token, refreshAuth } = useGoogleAuth();
 
   const fetchAccessToken = useCallback(
     async ({
-      forceRefreshToken: _forceRefreshToken,
+      forceRefreshToken,
     }: {
       forceRefreshToken: boolean;
     }) => {
-      // We cannot silently refresh Google ID tokens client-side.
-      // Return the current token if it still passes validation; otherwise null
-      // (Convex will surface isAuthenticated: false and the user re-logs in).
-      if (token && validateGoogleJwt(token)) return token;
-      return null;
+      if (token && validateGoogleJwt(token) && !forceRefreshToken) return token;
+      return refreshAuth();
     },
-    [token],
+    [token, refreshAuth],
   );
 
   return useMemo(
@@ -248,5 +354,4 @@ export function useConvexGoogleAuth() {
   );
 }
 
-// Re-export constants so the callback page can use the same keys
-export { TOKEN_KEY, OAUTH_NONCE_KEY, validateGoogleJwt };
+export { TOKEN_KEY, SESSION_KEY, OAUTH_NONCE_KEY, validateGoogleJwt };
