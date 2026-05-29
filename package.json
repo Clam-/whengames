@@ -10,7 +10,10 @@
     "preview": "vite preview",
     "convex": "convex dev",
     "convex:deploy": "convex deploy",
-    "dev:design": "vite --config vite.config.mock.ts"
+    "dev:design": "vite --config vite.config.mock.ts",
+    "docker:build": "docker build -t ghcr.io/whenwhenwhenwhenwhen/when:latest .",
+    "docker:push": "docker push ghcr.io/whenwhenwhenwhenwhen/when:latest",
+    "docker:deploy": "pnpm docker:build && pnpm docker:push"
   },
   "dependencies": {
     "convex": "^1.37.0",
