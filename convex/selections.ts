@@ -123,13 +123,25 @@ export const set = mutation({
       return null;
     }
 
-    // Guard: reject nominations on disallowed cells
+    // Guard: reject nominations on disallowed cells (creator auto-allows)
     const schedule = await ctx.db.get(args.scheduleId);
     if (
       schedule &&
       isSlotDisallowed(schedule.disallowedSlots, args.dayKey, args.timeSlot)
     ) {
-      return null;
+      const callerIsCreator =
+        schedule.creatorProfileId === args.profileId ||
+        (args.callerProfileId !== undefined &&
+          schedule.creatorProfileId === args.callerProfileId);
+      if (callerIsCreator) {
+        await ctx.db.patch(args.scheduleId, {
+          disallowedSlots: (schedule.disallowedSlots || []).filter(
+            (s) => !(s.dayKey === args.dayKey && s.timeSlot === args.timeSlot)
+          ),
+        });
+      } else {
+        return null;
+      }
     }
 
     // Guard: reject changes outside one-off schedule date range
@@ -224,13 +236,19 @@ export const remove = mutation({
       return;
     }
 
-    // Guard: reject changes on disallowed cells
+    // Guard: reject changes on disallowed cells (skip for creator)
     const schedule = await ctx.db.get(args.scheduleId);
     if (
       schedule &&
       isSlotDisallowed(schedule.disallowedSlots, args.dayKey, args.timeSlot)
     ) {
-      return;
+      const callerIsCreator =
+        schedule.creatorProfileId === args.profileId ||
+        (args.callerProfileId !== undefined &&
+          schedule.creatorProfileId === args.callerProfileId);
+      if (!callerIsCreator) {
+        return;
+      }
     }
 
     // Guard: reject changes outside one-off schedule date range
@@ -317,7 +335,29 @@ export const batchSet = mutation({
 
     // Load schedule once to check disallowed slots and date range
     const schedule = await ctx.db.get(args.scheduleId);
-    const disallowed = schedule?.disallowedSlots;
+    let disallowed = schedule?.disallowedSlots;
+
+    // Creator bypass: auto-allow disallowed cells being nominated, skip check for all
+    const callerIsCreator = schedule && (
+      schedule.creatorProfileId === args.profileId ||
+      (args.callerProfileId !== undefined &&
+        schedule.creatorProfileId === args.callerProfileId)
+    );
+    if (callerIsCreator && disallowed && disallowed.length > 0) {
+      const slotsToAllow = args.selections.filter(
+        (s) => s.state !== "blank" && isSlotDisallowed(disallowed, s.dayKey, s.timeSlot)
+      );
+      if (slotsToAllow.length > 0) {
+        const allowSet = new Set(
+          slotsToAllow.map((s) => `${s.dayKey}|${s.timeSlot}`)
+        );
+        disallowed = disallowed.filter(
+          (s) => !allowSet.has(`${s.dayKey}|${s.timeSlot}`)
+        );
+        await ctx.db.patch(args.scheduleId, { disallowedSlots: disallowed });
+      }
+      disallowed = undefined;
+    }
 
     // Helper to check if a dayKey is within one-off schedule date range
     const isInDateRange = (dayKey: string): boolean => {

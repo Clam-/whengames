@@ -12,7 +12,7 @@ import {
 import { getDstNotice } from "../lib/dst";
 
 type CellState = "can-do" | "cant-do" | "maybe" | "blank";
-type SelectMode = "auto" | "can-do" | "cant-do" | "maybe";
+type SelectMode = "auto" | "can-do" | "cant-do" | "maybe" | "blank";
 type AllowMode = "auto" | "allow" | "dont-allow";
 type CreatorMode = "limit" | "nominate" | "lock" | null;
 
@@ -620,10 +620,12 @@ export function WeeklyGrid({
             }
             onCreatorSlotChange(currentSlots);
           } else {
-            // Regular / nominate mode: filter out disallowed cells first
-            const allowedCells = selectedCells.filter(
-              (cell) => !isCellDisallowed(cell.dayIndex, cell.timeIndex)
-            );
+            // Regular / nominate mode: filter out disallowed cells (creators in nominate mode can override)
+            const allowedCells = (isCreator && creatorMode === "nominate")
+              ? selectedCells
+              : selectedCells.filter(
+                  (cell) => !isCellDisallowed(cell.dayIndex, cell.timeIndex)
+                );
             const state = dragActionRef.current as CellState;
             const batchSelections = allowedCells.map((cell) => {
               const { dayKey, timeSlot, isException, exceptionDate } =
@@ -894,18 +896,18 @@ export function WeeklyGrid({
                   const timeLineOffset =
                     (currentTimePosition - timeIndex) * 100;
 
-                  // In limit mode, disallowed cells are still interactive
-                  // In nominate/lock modes (and for non-creators), disallowed cells are disabled
+                  // In limit/nominate mode, disallowed cells are still interactive for creators
                   const inLimitMode = isCreator && creatorMode === "limit";
+                  const inCreatorNominateMode = isCreator && creatorMode === "nominate";
                   const cellDisabledForInteraction =
-                    cellDisallowed && !inLimitMode;
+                    cellDisallowed && !inLimitMode && !inCreatorNominateMode;
 
                   // Build className
                   const cellClasses = [
                     "grid-cell",
                     myState !== "blank" ? `state-${myState}` : "",
                     cellDisallowed ? "disallowed" : "",
-                    cellDisallowed && inLimitMode ? "limit-interactive" : "",
+                    cellDisallowed && (inLimitMode || inCreatorNominateMode) ? "limit-interactive" : "",
                     cellLocked ? "locked" : "",
                     isToday ? "current-day-col" : "",
                     isToday && timeIndex === TIME_SLOTS.length - 1

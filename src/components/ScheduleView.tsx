@@ -16,10 +16,10 @@ import { EditScheduleModal } from "./EditScheduleModal";
 import { ParticipantsMenu } from "./ParticipantsMenu";
 import { useAnonymousUser } from "../hooks/useAnonymousUser";
 import { useTimezone } from "../hooks/useTimezone";
-import { detectTimezone, getWeekDates } from "../lib/timezone";
+import { detectTimezone, getWeekDates, generateTimeSlots } from "../lib/timezone";
 import { DateTime } from "luxon";
 
-type SelectMode = "auto" | "can-do" | "cant-do" | "maybe";
+type SelectMode = "auto" | "can-do" | "cant-do" | "maybe" | "blank";
 type AllowMode = "auto" | "allow" | "dont-allow";
 type CreatorMode = "limit" | "nominate" | "lock" | null;
 
@@ -98,10 +98,10 @@ export function ScheduleView() {
       || !!(schedule.lockEditors as string[] | undefined)?.includes(profile._id as string)
     : false;
 
-  // Default to "limit" mode for creators
+  // Default to "nominate" mode for creators
   useEffect(() => {
     if (isCreator && creatorMode === null) {
-      setCreatorMode("limit");
+      setCreatorMode("nominate");
     }
   }, [isCreator, creatorMode]);
 
@@ -457,6 +457,50 @@ export function ScheduleView() {
     clearLockedSlots,
   ]);
 
+  const handleDisallowOutsideNominations = useCallback(async () => {
+    if (!schedule || !profile) return;
+
+    const timeSlots = generateTimeSlots();
+
+    // Build set of creator's "can-do" and "maybe" nomination keys
+    const nominatedSet = new Set<string>();
+    for (const sel of schedule.selections) {
+      if (sel.profileId !== (profile._id as string)) continue;
+      if (sel.state !== "can-do" && sel.state !== "maybe") continue;
+      if (schedule.type === "recurring" && sel.isException) continue;
+      nominatedSet.add(`${sel.dayKey}|${sel.timeSlot}`);
+    }
+
+    const disallowedSlots: { dayKey: string; timeSlot: string }[] = [];
+
+    if (schedule.type === "recurring") {
+      for (let dow = 0; dow < 7; dow++) {
+        for (const ts of timeSlots) {
+          if (!nominatedSet.has(`${dow}|${ts}`)) {
+            disallowedSlots.push({ dayKey: String(dow), timeSlot: ts });
+          }
+        }
+      }
+    } else if (schedule.dateRangeStart && schedule.dateRangeEnd) {
+      let current = DateTime.fromISO(schedule.dateRangeStart);
+      const end = DateTime.fromISO(schedule.dateRangeEnd);
+      while (current <= end) {
+        const dateStr = current.toISODate()!;
+        for (const ts of timeSlots) {
+          if (!nominatedSet.has(`${dateStr}|${ts}`)) {
+            disallowedSlots.push({ dayKey: dateStr, timeSlot: ts });
+          }
+        }
+        current = current.plus({ days: 1 });
+      }
+    }
+
+    await setDisallowedSlots({
+      scheduleId: schedule._id,
+      slots: disallowedSlots,
+    });
+  }, [schedule, profile, setDisallowedSlots]);
+
   if (!schedule) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-slate-900">
@@ -652,6 +696,7 @@ export function ScheduleView() {
                 <option value="can-do">Can Do</option>
                 <option value="cant-do">Can&apos;t Do</option>
                 <option value="maybe">Maybe</option>
+                <option value="blank">Clear</option>
               </select>
             )}
           </div>
@@ -705,6 +750,15 @@ export function ScheduleView() {
               >
                 Lock In Time
               </button>
+              {creatorMode === "nominate" && (
+                <button
+                  onClick={handleDisallowOutsideNominations}
+                  className="text-xs px-2 py-1 rounded border border-amber-300 text-amber-700 hover:bg-amber-50 hover:border-amber-400 transition-colors dark:border-amber-600 dark:text-amber-400 dark:hover:bg-amber-900/40 dark:hover:border-amber-500"
+                  title="Mark all times without 'Can Do' or 'Maybe' nominations as disallowed"
+                >
+                  Disallow Outside Nominations
+                </button>
+              )}
             </div>
           )}
 
