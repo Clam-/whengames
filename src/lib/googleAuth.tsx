@@ -61,6 +61,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { getConfig } from "../config";
@@ -269,9 +270,6 @@ export function GoogleAuthProvider({
       setToken(newToken);
       return newToken;
     }
-    if (!localStorage.getItem(SESSION_KEY)) {
-      setToken(null);
-    }
     return null;
   }, []);
 
@@ -292,6 +290,7 @@ export function GoogleAuthProvider({
     authUrl.searchParams.set("scope", "openid profile email");
     authUrl.searchParams.set("state", state);
     authUrl.searchParams.set("access_type", "offline");
+    authUrl.searchParams.set("prompt", "consent");
 
     window.location.href = authUrl.toString();
   }, []);
@@ -336,16 +335,29 @@ export function useGoogleAuth() {
 export function useConvexGoogleAuth() {
   const { isLoading, isAuthenticated, token, refreshAuth } = useGoogleAuth();
 
+  // Read token from a ref so fetchAccessToken has a stable identity —
+  // otherwise every refresh recreates the callback, ConvexProviderWithAuth
+  // re-calls setAuth(), and the client briefly clears auth (flicker).
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
+
   const fetchAccessToken = useCallback(
     async ({
       forceRefreshToken,
     }: {
       forceRefreshToken: boolean;
     }) => {
-      if (token && validateGoogleJwt(token) && !forceRefreshToken) return token;
-      return refreshAuth();
+      const t = tokenRef.current;
+      if (t && validateGoogleJwt(t) && !forceRefreshToken) return t;
+
+      const refreshed = await refreshAuth();
+      if (refreshed) return refreshed;
+
+      const current = tokenRef.current;
+      if (current && validateGoogleJwt(current)) return current;
+      return null;
     },
-    [token, refreshAuth],
+    [refreshAuth],
   );
 
   return useMemo(
