@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
 /* Custom theme overrides for Tailwind v4 */
 @theme {
   --color-can-do: #22c55e;
@@ -103,6 +114,18 @@
     rgba(156, 163, 175, 0.12) 3px,
     rgba(156, 163, 175, 0.12) 6px
   );
+}
+
+/* Calendar-synced cell indicator */
+.grid-cell.calendar-synced::after {
+  content: "\1F4C5";
+  position: absolute;
+  top: 0px;
+  right: 1px;
+  font-size: 7px;
+  line-height: 1;
+  opacity: 0.7;
+  pointer-events: none;
 }
 
 /* Locked cell styling */

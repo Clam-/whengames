@@ -294,6 +294,107 @@ http.route({
   }),
 });
 
+// ---------------------------------------------------------------------------
+// Google Calendar OAuth callback (incremental scope for calendar.readonly)
+// ---------------------------------------------------------------------------
+
+http.route({
+  path: "/auth/google/calendar-callback",
+  method: "GET",
+  handler: httpAction(async (ctx, req) => {
+    const url = new URL(req.url);
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state") || "/";
+    const error = url.searchParams.get("error");
+    const siteUrl = process.env.SITE_URL!;
+
+    if (error || !code) {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: `${siteUrl}/auth/calendar-callback#error=${encodeURIComponent(error || "no_code")}&state=${encodeURIComponent(state)}`,
+        },
+      });
+    }
+
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: process.env.AUTH_GOOGLE_ID!,
+        client_secret: process.env.AUTH_GOOGLE_SECRET!,
+        redirect_uri: `${process.env.CONVEX_SITE_URL}/auth/google/calendar-callback`,
+        grant_type: "authorization_code",
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      console.error("Calendar token exchange failed:", await tokenResponse.text());
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: `${siteUrl}/auth/calendar-callback#error=token_exchange_failed&state=${encodeURIComponent(state)}`,
+        },
+      });
+    }
+
+    const tokens = (await tokenResponse.json()) as {
+      access_token?: string;
+      refresh_token?: string;
+      id_token?: string;
+    };
+
+    if (!tokens.refresh_token || !tokens.access_token) {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: `${siteUrl}/auth/calendar-callback#error=no_refresh_token&state=${encodeURIComponent(state)}`,
+        },
+      });
+    }
+
+    let googleUserId = "";
+    if (tokens.id_token) {
+      const payload = decodeJwtPayload(tokens.id_token);
+      googleUserId = payload.sub as string;
+    }
+
+    // Fetch the user's calendar list using the access token
+    let availableCalendars: { id: string; summary: string }[] = [];
+    try {
+      const calListRes = await fetch(
+        "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+        { headers: { Authorization: `Bearer ${tokens.access_token}` } },
+      );
+      if (calListRes.ok) {
+        const calListData = (await calListRes.json()) as {
+          items?: Array<{ id: string; summary: string }>;
+        };
+        availableCalendars = (calListData.items ?? []).map((c) => ({
+          id: c.id,
+          summary: c.summary,
+        }));
+      }
+    } catch {
+      // Calendar list fetch is best-effort; sync will retry later
+    }
+
+    await ctx.runMutation(internal.calendarSources.storeGoogleCalendarToken, {
+      googleUserId,
+      calendarRefreshToken: tokens.refresh_token,
+      availableCalendars,
+    });
+
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: `${siteUrl}/auth/calendar-callback#success=true&state=${encodeURIComponent(state)}`,
+      },
+    });
+  }),
+});
+
 // CORS preflight for the refresh endpoint
 http.route({
   path: "/auth/refresh",

@@ -7,7 +7,9 @@ import { loadConfig } from "./config";
 import App from "./App";
 import { ScheduleView } from "./components/ScheduleView";
 import { AuthCallbackPage } from "./components/AuthCallbackPage";
+import { CalendarCallbackPage } from "./components/CalendarCallbackPage";
 import { AuthProfileSync } from "./components/AuthProfileSync";
+import { ToastProvider } from "./components/ToastProvider";
 import "./index.css";
 
 loadConfig().then((cfg) => {
@@ -17,14 +19,17 @@ loadConfig().then((cfg) => {
     <StrictMode>
       <GoogleAuthProvider>
         <ConvexProviderWithAuth client={convex} useAuth={useConvexGoogleAuth}>
-          <AuthProfileSync />
-          <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<App />} />
-              <Route path="/schedule/:id" element={<ScheduleView />} />
-              <Route path="/auth/callback" element={<AuthCallbackPage />} />
-            </Routes>
-          </BrowserRouter>
+          <ToastProvider>
+            <AuthProfileSync />
+            <BrowserRouter>
+              <Routes>
+                <Route path="/" element={<App />} />
+                <Route path="/schedule/:id" element={<ScheduleView />} />
+                <Route path="/auth/callback" element={<AuthCallbackPage />} />
+                <Route path="/auth/calendar-callback" element={<CalendarCallbackPage />} />
+              </Routes>
+            </BrowserRouter>
+          </ToastProvider>
         </ConvexProviderWithAuth>
       </GoogleAuthProvider>
     </StrictMode>,

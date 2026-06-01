@@ -1,9 +1,11 @@
 import { useState, useMemo } from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useGoogleAuth } from "../lib/googleAuth";
 import { getCommonTimezones } from "../lib/timezone";
 import { Id } from "../../convex/_generated/dataModel";
+import { CalendarSyncSettings } from "./CalendarSyncSettings";
+import { useToast } from "../hooks/useToast";
 
 interface Profile {
   _id: Id<"userProfiles">;
@@ -129,7 +131,15 @@ function TimezoneSearchSelect({
 export function UserSettingsModal({ profile, onClose }: Props) {
   const updateProfile = useMutation(api.users.updateProfile);
   const unlinkSso = useMutation(api.users.unlinkSso);
+  const triggerSync = useAction(api.calendarSync.triggerSyncForProfile);
   const { signOut } = useGoogleAuth();
+  const { showToast, updateToast } = useToast();
+
+  const calendarSources = useQuery(
+    api.calendarSources.getForProfile,
+    profile.authType === "sso" && profile._id ? { profileId: profile._id } : "skip",
+  );
+  const hasCalendarSources = (calendarSources ?? []).some((s: { enabled: boolean }) => s.enabled);
 
   const [displayName, setDisplayName] = useState(profile.displayName);
   const [timezone, setTimezone] = useState(profile.timezone);
@@ -180,6 +190,16 @@ export function UserSettingsModal({ profile, onClose }: Props) {
         dstNotifications,
       });
       onClose();
+
+      if (hasCalendarSources && profile._id) {
+        const toastId = showToast("Calendar sync in progress...", "info", 0);
+        try {
+          await triggerSync({ profileId: profile._id });
+          updateToast(toastId, { message: "Calendar sync complete!", type: "success", duration: 4000 });
+        } catch {
+          updateToast(toastId, { message: "Calendar sync failed. Will retry automatically.", type: "error", duration: 6000 });
+        }
+      }
     } catch (err) {
       console.error("Failed to save settings:", err);
     } finally {
@@ -326,6 +346,13 @@ export function UserSettingsModal({ profile, onClose }: Props) {
               DST change notifications
             </label>
           </div>
+
+          {profile.authType === "sso" && profile._id && (
+            <CalendarSyncSettings
+              profileId={profile._id}
+              userEmail={profile.ssoEmail}
+            />
+          )}
 
           <div className="flex justify-end gap-3 pt-2">
             <button

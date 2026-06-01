@@ -1,13 +1,19 @@
 import { cronJobs } from "convex/server";
 import { internal } from "./_generated/api";
 
-// Run DST check daily at midnight UTC
 const crons = cronJobs();
 
-crons.daily(
+crons.cron(
   "dst-notification-check",
-  { hourUTC: 0, minuteUTC: 0 },
+  "0 0 * * *",
   internal.dstNotifications.checkUpcomingDstChanges
+);
+
+crons.interval(
+  "calendar-sync-dispatch",
+  { minutes: 30 },
+  internal.calendarSync.dispatchOverdueSyncs,
+  {}
 );
 
 export default crons;

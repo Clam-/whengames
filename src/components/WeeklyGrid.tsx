@@ -26,6 +26,8 @@ interface Selection {
   state: "can-do" | "cant-do" | "maybe";
   isException?: boolean;
   exceptionDate?: string;
+  source?: "manual" | "calendar";
+  externalEventId?: string;
 }
 
 interface Profile {
@@ -208,6 +210,30 @@ export function WeeklyGrid({
       }
     }
     return map;
+  }, [schedule.selections, profileId, userTimezone, schedule.type, referenceDate]);
+
+  // Build a set of cell keys that are calendar-synced for the current user
+  const calendarSyncedCells = useMemo(() => {
+    const set = new Set<string>();
+    if (!profileId) return set;
+    for (const sel of schedule.selections) {
+      if (sel.profileId !== profileId) continue;
+      if (sel.source !== "calendar") continue;
+      if (schedule.type === "one-off") {
+        const converted = convertOneOffSlot(sel.dayKey, sel.timeSlot, sel.timezone, userTimezone);
+        set.add(`${converted.date}|${converted.time}`);
+      } else {
+        if (sel.isException && sel.exceptionDate) {
+          const converted = convertOneOffSlot(sel.exceptionDate, sel.timeSlot, sel.timezone, userTimezone);
+          set.add(`exc:${converted.date}|${converted.time}`);
+        } else {
+          const dow = parseInt(sel.dayKey);
+          const converted = convertRecurringSlot(dow, sel.timeSlot, sel.timezone, userTimezone, referenceDate);
+          set.add(`${converted.dayOfWeek}|${converted.time}`);
+        }
+      }
+    }
+    return set;
   }, [schedule.selections, profileId, userTimezone, schedule.type, referenceDate]);
 
   // Build a map of all users' selections for each cell (for profile icons)
@@ -883,6 +909,7 @@ export function WeeklyGrid({
                   const otherSelections = allCellSelections.get(cellKey) || [];
                   const cellDisallowed = isCellDisallowed(dayIndex, timeIndex);
                   const cellLocked = isCellLocked(dayIndex, timeIndex);
+                  const cellCalendarSynced = calendarSyncedCells.has(cellKey);
                   const isToday = dayIndex === currentDayIndex;
                   const dragSelectionClass = getDragSelectionClass(
                     dayIndex,
@@ -909,6 +936,7 @@ export function WeeklyGrid({
                     cellDisallowed ? "disallowed" : "",
                     cellDisallowed && (inLimitMode || inCreatorNominateMode) ? "limit-interactive" : "",
                     cellLocked ? "locked" : "",
+                    cellCalendarSynced ? "calendar-synced" : "",
                     isToday ? "current-day-col" : "",
                     isToday && timeIndex === TIME_SLOTS.length - 1
                       ? "current-day-col-last"

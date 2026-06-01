@@ -86,6 +86,9 @@ export default defineSchema({
     // For recurring schedule one-off exceptions
     isException: v.optional(v.boolean()),
     exceptionDate: v.optional(v.string()), // ISO date for the specific exception
+    // Calendar sync metadata
+    source: v.optional(v.union(v.literal("manual"), v.literal("calendar"))),
+    externalEventId: v.optional(v.string()),
   })
     .index("by_schedule", ["scheduleId"])
     .index("by_schedule_profile", ["scheduleId", "profileId"])
@@ -130,6 +133,47 @@ export default defineSchema({
   })
     .index("by_sessionToken", ["sessionToken"])
     .index("by_googleUserId", ["googleUserId"]),
+
+  // External calendar sources (Google Calendar or ICS URLs)
+  calendarSources: defineTable({
+    profileId: v.id("userProfiles"),
+    type: v.union(v.literal("google"), v.literal("ics")),
+    // Google-specific
+    calendarRefreshToken: v.optional(v.string()),
+    googleUserId: v.optional(v.string()),
+    availableCalendars: v.optional(
+      v.array(
+        v.object({
+          id: v.string(),
+          summary: v.string(),
+        })
+      )
+    ),
+    selectedCalendarIds: v.optional(v.array(v.string())),
+    // ICS-specific
+    icsUrl: v.optional(v.string()),
+    // Sync state
+    lastSyncAt: v.optional(v.number()),
+    lastSyncStatus: v.optional(
+      v.union(v.literal("success"), v.literal("error"))
+    ),
+    lastSyncError: v.optional(v.string()),
+    enabled: v.boolean(),
+    createdAt: v.number(),
+  })
+    .index("by_profileId", ["profileId"])
+    .index("by_lastSyncAt", ["lastSyncAt"]),
+
+  // User overrides for calendar-synced "can't do" cells
+  calendarOverrides: defineTable({
+    profileId: v.id("userProfiles"),
+    scheduleId: v.id("schedules"),
+    externalEventId: v.string(),
+    dayKey: v.string(),
+    timeSlot: v.string(),
+  })
+    .index("by_profile_schedule", ["profileId", "scheduleId"])
+    .index("by_profile_event", ["profileId", "externalEventId"]),
 
   // DST notification check log
   dstCheckLog: defineTable({

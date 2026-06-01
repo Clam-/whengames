@@ -135,6 +135,8 @@ export const get = query({
       state: s.state,
       isException: s.isException,
       exceptionDate: s.exceptionDate,
+      source: s.source,
+      externalEventId: s.externalEventId,
     }));
 
     const allSelections = [
