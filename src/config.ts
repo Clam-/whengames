@@ -2,6 +2,8 @@ interface AppConfig {
   CONVEX_URL: string;
   CONVEX_SITE_URL: string;
   GOOGLE_CLIENT_ID: string;
+  // Optional — only required when using Discord integration
+  DISCORD_CLIENT_ID?: string;
 }
 
 let config: AppConfig | null = null;
@@ -26,6 +28,9 @@ export async function loadConfig(): Promise<AppConfig> {
     CONVEX_URL: import.meta.env.VITE_CONVEX_URL as string,
     CONVEX_SITE_URL: import.meta.env.VITE_CONVEX_SITE_URL as string,
     GOOGLE_CLIENT_ID: import.meta.env.VITE_GOOGLE_CLIENT_ID as string,
+    DISCORD_CLIENT_ID:
+      (import.meta.env.VITE_DISCORD_CLIENT_ID as string | undefined) ??
+      undefined,
   };
   return config;
 }

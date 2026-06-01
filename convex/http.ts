@@ -1,6 +1,7 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { verifyDiscordSignature } from "./discordHelpers";
 
 const http = httpRouter();
 
@@ -406,6 +407,236 @@ http.route({
         "Access-Control-Allow-Origin": process.env.SITE_URL!,
         "Access-Control-Allow-Methods": "POST",
         "Access-Control-Allow-Headers": "Content-Type",
+      },
+    });
+  }),
+});
+
+// ---------------------------------------------------------------------------
+// Discord interactions endpoint
+//
+// Discord sends interaction webhooks here (slash commands, message
+// components, modals). The endpoint MUST:
+//   1. Verify the Ed25519 signature using the app's public key
+//   2. Respond to PING (type 1) with PONG (type 1) — required during
+//      "interaction endpoint URL" setup
+//   3. Respond within 3 seconds. For long work, use deferred response.
+// ---------------------------------------------------------------------------
+
+http.route({
+  path: "/discord/interactions",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    const signature = req.headers.get("X-Signature-Ed25519");
+    const timestamp = req.headers.get("X-Signature-Timestamp");
+    const body = await req.text();
+
+    if (!signature || !timestamp) {
+      return new Response("Missing signature", { status: 401 });
+    }
+
+    const publicKey = process.env.DISCORD_PUBLIC_KEY;
+    if (!publicKey) {
+      console.error("DISCORD_PUBLIC_KEY env var not set");
+      return new Response("Server not configured", { status: 500 });
+    }
+
+    const ok = await verifyDiscordSignature(
+      publicKey,
+      signature,
+      timestamp,
+      body
+    );
+    if (!ok) {
+      return new Response("Invalid signature", { status: 401 });
+    }
+
+    const interaction = JSON.parse(body) as {
+      type: number;
+      data?: {
+        name?: string;
+        custom_id?: string;
+        values?: string[];
+        component_type?: number;
+      };
+      member?: { user?: { id: string; username?: string } };
+      user?: { id: string; username?: string };
+    };
+
+    // PING — required during initial endpoint setup
+    if (interaction.type === 1) {
+      return new Response(JSON.stringify({ type: 1 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const discordUserId =
+      interaction.member?.user?.id ?? interaction.user?.id ?? "";
+
+    // APPLICATION_COMMAND — /when
+    if (interaction.type === 2 && interaction.data?.name === "when") {
+      const schedules = await ctx.runQuery(
+        internal.discord.listSchedulesForDiscordUser,
+        { discordUserId }
+      );
+
+      if (schedules.length === 0) {
+        return new Response(
+          JSON.stringify({
+            type: 4,
+            data: {
+              flags: 64,
+              content:
+                "You don't have any schedules yet. Create one at the When? app, or link your Discord account in user settings to see your own schedules here.",
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      const options = schedules.map((s) => ({
+        label: s.title.slice(0, 100),
+        value: s._id as string,
+        description:
+          s.type === "recurring"
+            ? s.isLocked
+              ? "Recurring · locked"
+              : "Recurring"
+            : s.isLocked
+              ? "One-off · locked"
+              : "One-off",
+      }));
+
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            flags: 64, // ephemeral
+            content: "Pick a schedule to share in this channel:",
+            components: [
+              {
+                type: 1,
+                components: [
+                  {
+                    type: 3,
+                    custom_id: "when_pick_schedule",
+                    placeholder: "Choose a schedule",
+                    options,
+                    min_values: 1,
+                    max_values: 1,
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // MESSAGE_COMPONENT — user picked a schedule from the select menu
+    if (
+      interaction.type === 3 &&
+      interaction.data?.custom_id === "when_pick_schedule" &&
+      interaction.data.values?.[0]
+    ) {
+      const scheduleId = interaction.data.values[0] as unknown as
+        | undefined
+        | (string & { _brand?: never });
+      if (!scheduleId) {
+        return new Response(
+          JSON.stringify({ type: 4, data: { flags: 64, content: "No schedule selected." } }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      const summary = await ctx.runAction(
+        internal.discord.buildInteractionSummary,
+        { scheduleId: scheduleId as unknown as never }
+      );
+
+      if (!summary) {
+        return new Response(
+          JSON.stringify({
+            type: 4,
+            data: {
+              flags: 64,
+              content: "Sorry, that schedule could not be found.",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // Public message (no flags=64) — visible to the whole channel
+      return new Response(
+        JSON.stringify({ type: 4, data: summary }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // Unknown interaction — politely ignore
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: { flags: 64, content: "Sorry, I don't recognise that action." },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }),
+});
+
+// ---------------------------------------------------------------------------
+// Discord bot install callback
+//
+// The user clicks "Link to Discord" in the schedule view. That creates an
+// install session and redirects them to Discord's OAuth dialog with the
+// `bot` + `applications.commands` scopes. After they pick a guild and
+// authorise, Discord redirects here with a code + guild_id + state.
+//
+// We don't actually need the user's access token (we use the bot token
+// for posting). We just record the guild and fetch its channel list,
+// then redirect the user to the channel picker page on the frontend.
+// ---------------------------------------------------------------------------
+
+http.route({
+  path: "/discord/install-callback",
+  method: "GET",
+  handler: httpAction(async (ctx, req) => {
+    const url = new URL(req.url);
+    const state = url.searchParams.get("state") || "";
+    const guildId = url.searchParams.get("guild_id");
+    const error = url.searchParams.get("error");
+    const siteUrl = process.env.SITE_URL!;
+
+    if (error || !state || !guildId) {
+      const params = new URLSearchParams();
+      params.set("error", error || "missing_params");
+      params.set("session", state);
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: `${siteUrl}/discord/link-channel?${params.toString()}`,
+        },
+      });
+    }
+
+    // Pull channel list using the bot token and persist on the session
+    await ctx.runAction(internal.discord.completeInstallSession, {
+      sessionToken: state,
+      guildId,
+    });
+
+    const params = new URLSearchParams();
+    params.set("session", state);
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: `${siteUrl}/discord/link-channel?${params.toString()}`,
       },
     });
   }),

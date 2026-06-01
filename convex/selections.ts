@@ -1,6 +1,61 @@
 import { v } from "convex/values";
 import { mutation, query, MutationCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
+
+const DEFAULT_DISCORD_DEBOUNCE_MS = 5 * 60 * 1000;
+
+function getDiscordDebounceMs(): number {
+  const raw = process.env.DISCORD_DEBOUNCE_MS;
+  if (!raw) return DEFAULT_DISCORD_DEBOUNCE_MS;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_DISCORD_DEBOUNCE_MS;
+}
+
+/**
+ * Inline change-detection: if this schedule has any linked Discord
+ * channels AND the affected cells overlap with locked slots, queue
+ * (or re-queue) a debounced update. Cheap when there are no links.
+ */
+async function notifyDiscordIfLockedImpacted(
+  ctx: MutationCtx,
+  scheduleId: Id<"schedules">,
+  affectedCells: { dayKey: string; timeSlot: string }[]
+) {
+  const links = await ctx.db
+    .query("scheduleDiscordLinks")
+    .withIndex("by_schedule", (q) => q.eq("scheduleId", scheduleId))
+    .collect();
+  if (links.length === 0) return;
+
+  const schedule = await ctx.db.get(scheduleId);
+  if (!schedule) return;
+  const locked = schedule.lockedSlots ?? [];
+  if (locked.length === 0) return;
+
+  const lockedSet = new Set(locked.map((s) => `${s.dayKey}|${s.timeSlot}`));
+  const anyOverlap = affectedCells.some((c) =>
+    lockedSet.has(`${c.dayKey}|${c.timeSlot}`)
+  );
+  if (!anyOverlap) return;
+
+  const debounceMs = getDiscordDebounceMs();
+  for (const link of links) {
+    if (link.pendingScheduledId) {
+      try {
+        await ctx.scheduler.cancel(link.pendingScheduledId);
+      } catch {
+        // already fired
+      }
+    }
+    const newId = await ctx.scheduler.runAfter(
+      debounceMs,
+      internal.discord.sendDebouncedUpdate,
+      { linkId: link._id }
+    );
+    await ctx.db.patch(link._id, { pendingScheduledId: newId });
+  }
+}
 
 // Helper: check if a profile is blocked from a schedule
 async function isProfileBlocked(
@@ -171,6 +226,9 @@ export const set = mutation({
           args.state,
           args.timezone
         );
+        await notifyDiscordIfLockedImpacted(ctx, args.scheduleId, [
+          { dayKey: args.dayKey, timeSlot: args.timeSlot },
+        ]);
         return null;
       }
     }
@@ -223,6 +281,7 @@ export const set = mutation({
       }
     }
 
+    let resultId: Id<"selections">;
     if (existing.length > 0) {
       await ctx.db.patch(existing[0]._id, {
         state: args.state,
@@ -233,19 +292,24 @@ export const set = mutation({
       for (let i = 1; i < existing.length; i++) {
         await ctx.db.delete(existing[i]._id);
       }
-      return existing[0]._id;
+      resultId = existing[0]._id;
+    } else {
+      resultId = await ctx.db.insert("selections", {
+        scheduleId: args.scheduleId,
+        profileId: args.profileId,
+        dayKey: args.dayKey,
+        timeSlot: args.timeSlot,
+        timezone: args.timezone,
+        state: args.state,
+        isException: args.isException,
+        exceptionDate: args.exceptionDate,
+      });
     }
 
-    return await ctx.db.insert("selections", {
-      scheduleId: args.scheduleId,
-      profileId: args.profileId,
-      dayKey: args.dayKey,
-      timeSlot: args.timeSlot,
-      timezone: args.timezone,
-      state: args.state,
-      isException: args.isException,
-      exceptionDate: args.exceptionDate,
-    });
+    await notifyDiscordIfLockedImpacted(ctx, args.scheduleId, [
+      { dayKey: args.dayKey, timeSlot: args.timeSlot },
+    ]);
+    return resultId;
   },
 });
 
@@ -306,6 +370,9 @@ export const remove = mutation({
           args.dayKey,
           args.timeSlot
         );
+        await notifyDiscordIfLockedImpacted(ctx, args.scheduleId, [
+          { dayKey: args.dayKey, timeSlot: args.timeSlot },
+        ]);
         return;
       }
     }
@@ -360,6 +427,10 @@ export const remove = mutation({
     for (const record of existing) {
       await ctx.db.delete(record._id);
     }
+
+    await notifyDiscordIfLockedImpacted(ctx, args.scheduleId, [
+      { dayKey: args.dayKey, timeSlot: args.timeSlot },
+    ]);
   },
 });
 
@@ -508,6 +579,11 @@ export const batchSet = mutation({
           });
         }
       }
+      await notifyDiscordIfLockedImpacted(
+        ctx,
+        args.scheduleId,
+        args.selections.map((s) => ({ dayKey: s.dayKey, timeSlot: s.timeSlot }))
+      );
       return;
     }
 
@@ -561,6 +637,12 @@ export const batchSet = mutation({
         });
       }
     }
+
+    await notifyDiscordIfLockedImpacted(
+      ctx,
+      args.scheduleId,
+      args.selections.map((s) => ({ dayKey: s.dayKey, timeSlot: s.timeSlot }))
+    );
   },
 });
 

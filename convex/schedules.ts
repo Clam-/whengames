@@ -1,6 +1,43 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, MutationCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
+
+const DEFAULT_DISCORD_DEBOUNCE_MS = 5 * 60 * 1000;
+function getDiscordDebounceMs(): number {
+  const raw = process.env.DISCORD_DEBOUNCE_MS;
+  if (!raw) return DEFAULT_DISCORD_DEBOUNCE_MS;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_DISCORD_DEBOUNCE_MS;
+}
+
+/** Force-queues a debounced Discord update — used when the lock state itself changes. */
+async function notifyDiscordForceQueue(
+  ctx: MutationCtx,
+  scheduleId: Id<"schedules">
+) {
+  const links = await ctx.db
+    .query("scheduleDiscordLinks")
+    .withIndex("by_schedule", (q) => q.eq("scheduleId", scheduleId))
+    .collect();
+  if (links.length === 0) return;
+  const debounceMs = getDiscordDebounceMs();
+  for (const link of links) {
+    if (link.pendingScheduledId) {
+      try {
+        await ctx.scheduler.cancel(link.pendingScheduledId);
+      } catch {
+        // already fired
+      }
+    }
+    const newId = await ctx.scheduler.runAfter(
+      debounceMs,
+      internal.discord.sendDebouncedUpdate,
+      { linkId: link._id }
+    );
+    await ctx.db.patch(link._id, { pendingScheduledId: newId });
+  }
+}
 
 /**
  * Get the JS day-of-week (0=Sunday, 6=Saturday) from an ISO date string.
@@ -439,6 +476,22 @@ export const remove = mutation({
       await ctx.db.delete(log._id);
     }
 
+    // Delete Discord links + cancel any pending debounced sends
+    const discordLinks = await ctx.db
+      .query("scheduleDiscordLinks")
+      .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
+      .collect();
+    for (const link of discordLinks) {
+      if (link.pendingScheduledId) {
+        try {
+          await ctx.scheduler.cancel(link.pendingScheduledId);
+        } catch {
+          // already fired
+        }
+      }
+      await ctx.db.delete(link._id);
+    }
+
     // Delete the schedule itself
     await ctx.db.delete(args.scheduleId);
   },
@@ -483,6 +536,11 @@ export const setDisallowedSlots = mutation({
       disallowedSlots: filteredSlots,
       lockedSlots: filteredLocked,
     });
+
+    // If we just stripped some locked slots, that's a notify-worthy change.
+    if (filteredLocked.length !== (schedule.lockedSlots?.length ?? 0)) {
+      await notifyDiscordForceQueue(ctx, args.scheduleId);
+    }
   },
 });
 
@@ -530,6 +588,8 @@ export const setLockedSlots = mutation({
       lockedSlots: filteredSlots,
       isLocked: true,
     });
+
+    await notifyDiscordForceQueue(ctx, args.scheduleId);
   },
 });
 
@@ -605,6 +665,11 @@ export const removeParticipant = mutation({
         await ctx.db.delete(record._id);
       }
     }
+
+    // Participant removal can impact locked-slot outcomes.
+    if ((schedule?.lockedSlots ?? []).length > 0) {
+      await notifyDiscordForceQueue(ctx, args.scheduleId);
+    }
   },
 });
 
@@ -665,6 +730,10 @@ export const blockParticipant = mutation({
       for (const record of batch) {
         await ctx.db.delete(record._id);
       }
+    }
+
+    if ((schedule?.lockedSlots ?? []).length > 0) {
+      await notifyDiscordForceQueue(ctx, args.scheduleId);
     }
   },
 });
@@ -738,6 +807,8 @@ export const clearLockedSlots = mutation({
       lockedSlots: [],
       isLocked: false,
     });
+
+    await notifyDiscordForceQueue(ctx, args.scheduleId);
   },
 });
 

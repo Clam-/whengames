@@ -14,6 +14,7 @@ import { SaveAvailabilityModal } from "./SaveAvailabilityModal";
 import { ManageSavedAvailabilitiesModal } from "./ManageSavedAvailabilitiesModal";
 import { EditScheduleModal } from "./EditScheduleModal";
 import { ParticipantsMenu } from "./ParticipantsMenu";
+import { DiscordLinkButton } from "./DiscordLinkButton";
 import { useAnonymousUser } from "../hooks/useAnonymousUser";
 import { useTimezone } from "../hooks/useTimezone";
 import { detectTimezone, getWeekDates, generateTimeSlots } from "../lib/timezone";
@@ -597,6 +598,11 @@ export function ScheduleView() {
               <span className="text-xs text-gray-400 dark:text-slate-500">
                 My timezone: {timezone}
               </span>
+              <DiscordLinkButton
+                scheduleId={schedule._id}
+                profileId={profile?._id ?? null}
+                isCreator={!!isCreator}
+              />
               {isCreator && (
                 <button
                   onClick={() => setShowEditModal(true)}

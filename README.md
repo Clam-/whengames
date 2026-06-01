@@ -252,6 +252,90 @@ When going to production, make sure:
    npx convex deploy
    ```
 
+## Discord Integration (optional)
+
+The schedule view includes a "Link to Discord" button that lets a schedule
+creator pipe live updates into a Discord channel. Three integration surfaces
+ship today:
+
+1. **Slash command** — `/when` opens a select menu of schedules the
+   invoker can choose from. Linking your Discord account to a When?
+   profile (see "User identity linking" below) makes that menu show the
+   schedules you created or participate in; otherwise it falls back to
+   the most recently created public schedules.
+2. **Message components** — selecting a schedule from `/when` posts a
+   rich embed (locked-in times + top nominations + "Open in When?"
+   button) into the current channel. The same embed is used for linked
+   channels.
+3. **Schedule → channel link** — the creator clicks the Discord icon on
+   the schedule view, gets bounced through Discord's OAuth bot-install
+   flow, picks a channel in their server, and the bot posts an initial
+   summary. After that the bot watches for *locked-time-impacting*
+   changes (the locked slot list mutating, or a participant becoming
+   unavailable on a locked cell) and edits the existing message with an
+   updated summary. Updates are debounced — see
+   `DISCORD_DEBOUNCE_MS` below.
+
+### Setting it up
+
+1. Create a Discord application: <https://discord.com/developers/applications>
+2. On the application's **Bot** tab, create a bot and copy:
+   - **Bot Token** → set as `DISCORD_BOT_TOKEN` on Convex
+3. On **General Information** copy:
+   - **Application ID** → set as `DISCORD_APP_ID` on Convex and
+     `DISCORD_CLIENT_ID` (or `VITE_DISCORD_CLIENT_ID`) for the frontend
+   - **Public Key** → set as `DISCORD_PUBLIC_KEY` on Convex
+4. On **General Information**, set the *Interactions Endpoint URL* to:
+   ```
+   https://<your-convex-deployment>.convex.site/discord/interactions
+   ```
+   Discord will ping the URL with a `type: 1` payload — Convex must be
+   deployed first so the endpoint responds.
+5. Register the slash command:
+   ```bash
+   npx convex run discordSetup:registerCommands
+   ```
+   Or for a single guild (faster iteration):
+   ```bash
+   npx convex run discordSetup:registerGuildCommands '{"guildId":"YOUR_GUILD_ID"}'
+   ```
+6. (Optional) Override the debounce window — defaults to 5 minutes:
+   ```bash
+   npx convex env set DISCORD_DEBOUNCE_MS 300000
+   ```
+
+### User identity linking
+
+`/when` shows "schedules you participate in" only if the Discord user has
+linked their Discord account to their When? profile. There's a Convex
+mutation (`api.discord.linkDiscordUser`) ready to wire up — drop a UI for
+it in the user settings modal if you want this feature. Until then,
+`/when` falls back to public schedules.
+
+### Discord Activities (embedded app)
+
+The fourth integration the spec calls for — rendering a schedule as a
+"Discord Activity" embedded inside a voice channel — is a substantially
+different surface area than the slash-command / channel-message
+integrations above. To make it work you would need to:
+
+- Enable **Activities** for the Discord application (in the
+  Developer Portal → URL Mappings).
+- Map a public URL (e.g. `/discord-activity` on this app) and stand up a
+  matching React entrypoint that uses the
+  [`@discord/embedded-app-sdk`](https://github.com/discord/embedded-app-sdk)
+  to authenticate the iframe-embedded session and proxy network calls
+  through Discord's CDN proxy.
+- Re-authenticate the user using Discord's OAuth flow inside the activity
+  (different `client_id`, `redirect_uri` and PKCE flow).
+- Compose a slimmed-down `ScheduleView` that fits inside the activity
+  iframe and works in the activity's CSP-locked network sandbox.
+
+In short: feasible (the schedule view is already self-contained enough
+that it could be reused), but a several-day undertaking and out of scope
+for this scaffold. The Convex backend can be shared as-is. Treat this
+section as a TODO marker.
+
 ## Architecture
 
 ### Authentication
@@ -313,6 +397,9 @@ convex/
   profileImages.ts       - Background profile image download/storage
   crons.ts               - Daily DST check cron job
   dstNotifications.ts    - DST impact calculation (placeholder email)
+  discord.ts             - Discord integration: linking, summary builds, debounced sends
+  discordHelpers.ts      - Ed25519 verify, Discord REST helpers, summary formatting
+  discordSetup.ts        - One-shot action to register the /when slash command
 
 src/
   config.ts              - Runtime configuration loader (fetches /config.json or falls back to env vars)

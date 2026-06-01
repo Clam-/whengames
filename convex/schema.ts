@@ -187,4 +187,53 @@ export default defineSchema({
     "profileId",
     "dstChangeDate",
   ]),
+
+  // Links a schedule to a Discord channel for notifications
+  scheduleDiscordLinks: defineTable({
+    scheduleId: v.id("schedules"),
+    channelId: v.string(),
+    channelName: v.optional(v.string()),
+    guildId: v.string(),
+    guildName: v.optional(v.string()),
+    linkedByProfileId: v.id("userProfiles"),
+    linkedAt: v.number(),
+    // Discord message ID of the most recently sent summary (for edit/jump links)
+    lastMessageId: v.optional(v.string()),
+    // JSON-serialised locked-slot snapshot used to detect meaningful changes
+    lastSnapshotJson: v.optional(v.string()),
+    // Currently scheduled debounced send, if any (so we can cancel + reschedule)
+    pendingScheduledId: v.optional(v.id("_scheduled_functions")),
+    lastNotifiedAt: v.optional(v.number()),
+  })
+    .index("by_schedule", ["scheduleId"])
+    .index("by_channel", ["channelId"]),
+
+  // Maps a Discord user to a When profile (so /when can show "your" schedules)
+  discordUserLinks: defineTable({
+    profileId: v.id("userProfiles"),
+    discordUserId: v.string(),
+    discordUsername: v.optional(v.string()),
+    linkedAt: v.number(),
+  })
+    .index("by_profileId", ["profileId"])
+    .index("by_discordUserId", ["discordUserId"]),
+
+  // Short-lived OAuth/install state for the schedule -> channel link flow
+  discordInstallSessions: defineTable({
+    sessionToken: v.string(),
+    scheduleId: v.id("schedules"),
+    profileId: v.id("userProfiles"),
+    guildId: v.optional(v.string()),
+    guildName: v.optional(v.string()),
+    channels: v.optional(
+      v.array(
+        v.object({
+          id: v.string(),
+          name: v.string(),
+          type: v.number(),
+        })
+      )
+    ),
+    createdAt: v.number(),
+  }).index("by_sessionToken", ["sessionToken"]),
 });

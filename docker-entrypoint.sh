@@ -7,7 +7,8 @@ cat > /usr/share/nginx/html/config.json <<EOF
 {
   "CONVEX_URL": "${CONVEX_URL}",
   "CONVEX_SITE_URL": "${CONVEX_SITE_URL}",
-  "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}"
+  "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+  "DISCORD_CLIENT_ID": "${DISCORD_CLIENT_ID}"
 }
 EOF
 
