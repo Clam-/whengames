@@ -3,6 +3,8 @@ import { useNavigate } from "react-router";
 import { useAction, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Header } from "./Header";
+import { useGoogleAuth } from "../lib/googleAuth";
+import { useAnonymousUser } from "../hooks/useAnonymousUser";
 
 const DISCORD_INSTALL_NONCE_KEY = "whengames_discord_install_session";
 
@@ -16,6 +18,8 @@ const DISCORD_INSTALL_NONCE_KEY = "whengames_discord_install_session";
  */
 export function DiscordChannelPickerPage() {
   const navigate = useNavigate();
+  const { isAuthenticated, isLoading: authLoading } = useGoogleAuth();
+  const { anonymousId } = useAnonymousUser();
   const params = new URLSearchParams(window.location.search);
   const sessionToken = params.get("session");
   const error = params.get("error");
@@ -32,9 +36,19 @@ export function DiscordChannelPickerPage() {
     setTokenValidated(stored === sessionToken);
   }, [sessionToken]);
 
+  const ownerReady = !authLoading && (isAuthenticated || !!anonymousId);
+  const ownerArgs = {
+    anonymousId: isAuthenticated ? undefined : anonymousId || undefined,
+  };
+
   const session = useQuery(
     api.discord.getInstallSessionByToken,
-    sessionToken && tokenValidated ? { sessionToken } : "skip"
+    sessionToken && tokenValidated && ownerReady
+      ? {
+          sessionToken,
+          ...ownerArgs,
+        }
+      : "skip"
   );
 
   const linkScheduleToChannel = useAction(api.discord.linkScheduleToChannel);
@@ -56,6 +70,7 @@ export function DiscordChannelPickerPage() {
         sessionToken,
         channelId,
         channelName,
+        ...ownerArgs,
       });
       sessionStorage.removeItem(DISCORD_INSTALL_NONCE_KEY);
       setDone(true);

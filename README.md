@@ -285,13 +285,18 @@ ship today:
    - **Application ID** → set as `DISCORD_APP_ID` on Convex and
      `DISCORD_CLIENT_ID` (or `VITE_DISCORD_CLIENT_ID`) for the frontend
    - **Public Key** → set as `DISCORD_PUBLIC_KEY` on Convex
-4. On **General Information**, set the *Interactions Endpoint URL* to:
+   - **Client Secret** → set as `DISCORD_CLIENT_SECRET` on Convex
+4. On **OAuth2**, add this redirect URI:
+   ```
+   https://<your-convex-deployment>.convex.site/discord/install-callback
+   ```
+5. On **General Information**, set the *Interactions Endpoint URL* to:
    ```
    https://<your-convex-deployment>.convex.site/discord/interactions
    ```
    Discord will ping the URL with a `type: 1` payload — Convex must be
    deployed first so the endpoint responds.
-5. Register the slash command:
+6. Register the slash command:
    ```bash
    npx convex run discordSetup:registerCommands
    ```
@@ -299,7 +304,7 @@ ship today:
    ```bash
    npx convex run discordSetup:registerGuildCommands '{"guildId":"YOUR_GUILD_ID"}'
    ```
-6. (Optional) Override the debounce window — defaults to 5 minutes:
+7. (Optional) Override the debounce window — defaults to 5 minutes:
    ```bash
    npx convex env set DISCORD_DEBOUNCE_MS 300000
    ```
@@ -307,10 +312,10 @@ ship today:
 ### User identity linking
 
 `/when` shows "schedules you participate in" only if the Discord user has
-linked their Discord account to their When? profile. There's a Convex
-mutation (`api.discord.linkDiscordUser`) ready to wire up — drop a UI for
-it in the user settings modal if you want this feature. Until then,
-`/when` falls back to public schedules.
+linked their Discord account to their When? profile. The table and internal
+mutation are in place, but a public UI still needs a Discord OAuth user-link
+flow before it can safely write those links. Until then, `/when` falls back
+to public schedules.
 
 ### Discord Activities (embedded app)
 

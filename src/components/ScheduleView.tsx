@@ -601,6 +601,7 @@ export function ScheduleView() {
               <DiscordLinkButton
                 scheduleId={schedule._id}
                 profileId={profile?._id ?? null}
+                anonymousId={isAuthenticated ? undefined : anonymousId || undefined}
                 isCreator={!!isCreator}
               />
               {isCreator && (

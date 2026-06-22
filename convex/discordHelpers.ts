@@ -126,6 +126,38 @@ export async function fetchGuildInfo(
   return (await res.json()) as { name?: string };
 }
 
+export async function exchangeDiscordOAuthCode(
+  code: string,
+  redirectUri: string
+): Promise<boolean> {
+  const clientId = process.env.DISCORD_APP_ID;
+  const clientSecret = process.env.DISCORD_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new Error("DISCORD_APP_ID and DISCORD_CLIENT_SECRET must be set");
+  }
+
+  const body = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: redirectUri,
+  });
+
+  const res = await fetch(`${DISCORD_API}/oauth2/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+
+  if (!res.ok) {
+    console.error("exchangeDiscordOAuthCode failed", res.status, await res.text());
+    return false;
+  }
+
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Summary formatting — used by the linking flow + debounced updates
 // ---------------------------------------------------------------------------
@@ -164,6 +196,58 @@ const DAY_NAMES = [
   "Friday",
   "Saturday",
 ];
+
+const EMBED_TITLE_LIMIT = 256;
+const EMBED_DESCRIPTION_LIMIT = 4096;
+const EMBED_FIELD_VALUE_LIMIT = 1024;
+const EMBED_TOTAL_LIMIT = 6000;
+
+function truncateText(value: string | undefined, limit: number): string | undefined {
+  if (!value) return value;
+  if (value.length <= limit) return value;
+  return `${value.slice(0, Math.max(0, limit - 1))}…`;
+}
+
+function truncateFieldValue(value: string): string {
+  return truncateText(value, EMBED_FIELD_VALUE_LIMIT) ?? "";
+}
+
+function trimEmbedToDiscordLimits(embed: Record<string, unknown>): Record<string, unknown> {
+  const fields = (embed.fields as Array<{ name: string; value: string; inline: boolean }>) ?? [];
+  const title = truncateText(embed.title as string | undefined, EMBED_TITLE_LIMIT);
+  const description = truncateText(
+    embed.description as string | undefined,
+    EMBED_DESCRIPTION_LIMIT
+  );
+  const trimmedFields = fields.map((field) => ({
+    ...field,
+    value: truncateFieldValue(field.value),
+  }));
+
+  let total =
+    (title?.length ?? 0) +
+    (description?.length ?? 0) +
+    trimmedFields.reduce(
+      (sum, field) => sum + field.name.length + field.value.length,
+      0
+    );
+
+  for (let i = trimmedFields.length - 1; total > EMBED_TOTAL_LIMIT && i >= 0; i--) {
+    const field = trimmedFields[i];
+    const overage = total - EMBED_TOTAL_LIMIT;
+    const nextLength = Math.max(1, field.value.length - overage - 1);
+    const nextValue = truncateText(field.value, nextLength) ?? "";
+    total -= field.value.length - nextValue.length;
+    field.value = nextValue;
+  }
+
+  return {
+    ...embed,
+    title,
+    description,
+    fields: trimmedFields,
+  };
+}
 
 function formatSlotLabel(
   scheduleType: "one-off" | "recurring",
@@ -290,7 +374,7 @@ export function buildSummaryMessage(
 
   const url = `${input.appBaseUrl}/schedule/${schedule._id}`;
 
-  const embed: Record<string, unknown> = {
+  const embed: Record<string, unknown> = trimEmbedToDiscordLimits({
     title: schedule.title,
     url,
     description: schedule.description || undefined,
@@ -301,7 +385,7 @@ export function buildSummaryMessage(
     ],
     footer: { text: `Schedule type: ${schedule.type}` },
     timestamp: new Date().toISOString(),
-  };
+  });
 
   return {
     embeds: [embed],

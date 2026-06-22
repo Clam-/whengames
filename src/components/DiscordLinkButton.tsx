@@ -7,6 +7,7 @@ import { getConfig } from "../config";
 interface Props {
   scheduleId: Id<"schedules">;
   profileId: Id<"userProfiles"> | null;
+  anonymousId?: string;
   isCreator: boolean;
 }
 
@@ -16,7 +17,12 @@ const DISCORD_INSTALL_NONCE_KEY = "whengames_discord_install_session";
 //   0x400  +    0x800     +   0x4000     +  0x10000        = 0x14C00 = 84480
 const DISCORD_BOT_PERMISSIONS = "84480";
 
-export function DiscordLinkButton({ scheduleId, profileId, isCreator }: Props) {
+export function DiscordLinkButton({
+  scheduleId,
+  profileId,
+  anonymousId,
+  isCreator,
+}: Props) {
   const links = useQuery(api.discord.linksForScheduleSummary, { scheduleId });
   const createInstallSession = useMutation(api.discord.createInstallSession);
   const unlink = useMutation(api.discord.unlink);
@@ -28,7 +34,7 @@ export function DiscordLinkButton({ scheduleId, profileId, isCreator }: Props) {
     try {
       const sessionToken = await createInstallSession({
         scheduleId,
-        profileId,
+        anonymousId,
       });
       sessionStorage.setItem(DISCORD_INSTALL_NONCE_KEY, sessionToken);
 
@@ -55,14 +61,14 @@ export function DiscordLinkButton({ scheduleId, profileId, isCreator }: Props) {
     } finally {
       setBusy(false);
     }
-  }, [scheduleId, profileId, createInstallSession]);
+  }, [scheduleId, profileId, anonymousId, createInstallSession]);
 
   const handleUnlink = useCallback(
     async (linkId: Id<"scheduleDiscordLinks">) => {
       if (!profileId) return;
-      await unlink({ linkId, profileId });
+      await unlink({ linkId, anonymousId });
     },
-    [profileId, unlink]
+    [profileId, anonymousId, unlink]
   );
 
   const hasLinks = links && links.length > 0;

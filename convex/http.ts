@@ -1,7 +1,10 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { verifyDiscordSignature } from "./discordHelpers";
+import {
+  exchangeDiscordOAuthCode,
+  verifyDiscordSignature,
+} from "./discordHelpers";
 
 const http = httpRouter();
 
@@ -451,7 +454,7 @@ http.route({
       return new Response("Invalid signature", { status: 401 });
     }
 
-    const interaction = JSON.parse(body) as {
+    type DiscordInteraction = {
       type: number;
       data?: {
         name?: string;
@@ -462,6 +465,12 @@ http.route({
       member?: { user?: { id: string; username?: string } };
       user?: { id: string; username?: string };
     };
+    let interaction: DiscordInteraction;
+    try {
+      interaction = JSON.parse(body) as DiscordInteraction;
+    } catch {
+      return new Response("Malformed JSON", { status: 400 });
+    }
 
     // PING — required during initial endpoint setup
     if (interaction.type === 1) {
@@ -556,7 +565,10 @@ http.route({
 
       const summary = await ctx.runAction(
         internal.discord.buildInteractionSummary,
-        { scheduleId: scheduleId as unknown as never }
+        {
+          scheduleId: scheduleId as unknown as never,
+          discordUserId,
+        }
       );
 
       if (!summary) {
@@ -609,11 +621,12 @@ http.route({
   handler: httpAction(async (ctx, req) => {
     const url = new URL(req.url);
     const state = url.searchParams.get("state") || "";
+    const code = url.searchParams.get("code");
     const guildId = url.searchParams.get("guild_id");
     const error = url.searchParams.get("error");
     const siteUrl = process.env.SITE_URL!;
 
-    if (error || !state || !guildId) {
+    if (error || !state || !guildId || !code) {
       const params = new URLSearchParams();
       params.set("error", error || "missing_params");
       params.set("session", state);
@@ -625,14 +638,38 @@ http.route({
       });
     }
 
-    // Pull channel list using the bot token and persist on the session
-    await ctx.runAction(internal.discord.completeInstallSession, {
-      sessionToken: state,
-      guildId,
-    });
-
+    const redirectUri = new URL("/discord/install-callback", req.url).toString();
     const params = new URLSearchParams();
     params.set("session", state);
+
+    try {
+      const exchanged = await exchangeDiscordOAuthCode(code, redirectUri);
+      if (!exchanged) {
+        params.set("error", "oauth_exchange_failed");
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: `${siteUrl}/discord/link-channel?${params.toString()}`,
+          },
+        });
+      }
+
+      // Pull channel list using the bot token and persist on the session
+      await ctx.runAction(internal.discord.completeInstallSession, {
+        sessionToken: state,
+        guildId,
+      });
+    } catch (err) {
+      console.error("Discord install callback failed", err);
+      params.set("error", "install_callback_failed");
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: `${siteUrl}/discord/link-channel?${params.toString()}`,
+        },
+      });
+    }
+
     return new Response(null, {
       status: 302,
       headers: {

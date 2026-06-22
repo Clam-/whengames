@@ -91,6 +91,7 @@ export default defineSchema({
     externalEventId: v.optional(v.string()),
   })
     .index("by_schedule", ["scheduleId"])
+    .index("by_profileId", ["profileId"])
     .index("by_schedule_profile", ["scheduleId", "profileId"])
     .index("by_schedule_day_time", ["scheduleId", "dayKey", "timeSlot"]),
 
@@ -235,5 +236,7 @@ export default defineSchema({
       )
     ),
     createdAt: v.number(),
-  }).index("by_sessionToken", ["sessionToken"]),
+  })
+    .index("by_sessionToken", ["sessionToken"])
+    .index("by_createdAt", ["createdAt"]),
 });

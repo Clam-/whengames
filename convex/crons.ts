@@ -16,4 +16,11 @@ crons.interval(
   {}
 );
 
+crons.interval(
+  "discord-install-session-cleanup",
+  { hours: 1 },
+  internal.discord.cleanupExpiredInstallSessions,
+  {}
+);
+
 export default crons;
