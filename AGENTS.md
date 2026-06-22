@@ -12,4 +12,4 @@ Convex agent skills for common tasks can be installed by running
 
 <!-- convex-ai-end -->
 
-When running `pnpm build`, always request elevated permissions because pnpm may perform package-manager or metadata network access before executing the local build script.
+Do not run `pnpm build` directly as it will stall in sandbox. Instead always use `tsc -b --pretty false && vite build`
