@@ -77,6 +77,18 @@ export default defineSchema({
     .index("by_schedule", ["scheduleId"])
     .index("by_schedule_profile", ["scheduleId", "profileId"]),
 
+  selectionBatchInvalidations: defineTable({
+    scheduleId: v.id("schedules"),
+    profileId: v.id("userProfiles"),
+    invalidatedAt: v.number(),
+  })
+    .index("by_schedule", ["scheduleId"])
+    .index("by_schedule_profile_invalidatedAt", [
+      "scheduleId",
+      "profileId",
+      "invalidatedAt",
+    ]),
+
   selections: defineTable({
     scheduleId: v.id("schedules"),
     profileId: v.id("userProfiles"),
@@ -107,6 +119,14 @@ export default defineSchema({
       "scheduleId",
       "dayKey",
       "timeSlot",
+    ])
+    .index("by_profile_schedule_day_time_isException_exceptionDate", [
+      "profileId",
+      "scheduleId",
+      "dayKey",
+      "timeSlot",
+      "isException",
+      "exceptionDate",
     ])
     .index("by_schedule_day_time", ["scheduleId", "dayKey", "timeSlot"]),
 
@@ -190,7 +210,14 @@ export default defineSchema({
     timeSlot: v.string(),
   })
     .index("by_profile_schedule", ["profileId", "scheduleId"])
-    .index("by_profile_event", ["profileId", "externalEventId"]),
+    .index("by_profile_event", ["profileId", "externalEventId"])
+    .index("by_profile_schedule_externalEventId_dayKey_timeSlot", [
+      "profileId",
+      "scheduleId",
+      "externalEventId",
+      "dayKey",
+      "timeSlot",
+    ]),
 
   // DST notification check log
   dstCheckLog: defineTable({

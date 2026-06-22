@@ -1,9 +1,34 @@
 import { v } from "convex/values";
-import { mutation, query, MutationCtx } from "./_generated/server";
+import { internalMutation, mutation, query, MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 
 const DEFAULT_DISCORD_DEBOUNCE_MS = 5 * 60 * 1000;
+const BATCH_SET_SELECTION_LIMIT = 500;
+const SELECTION_DELETE_BATCH_SIZE = 500;
+const SELECTIONS_BY_SCHEDULE_LIMIT = 5000;
+const DISCORD_LINK_NOTIFY_BATCH_SIZE = 100;
+
+const batchSelectionValidator = v.object({
+  dayKey: v.string(),
+  timeSlot: v.string(),
+  state: v.union(
+    v.literal("can-do"),
+    v.literal("cant-do"),
+    v.literal("maybe"),
+    v.literal("blank")
+  ),
+  isException: v.optional(v.boolean()),
+  exceptionDate: v.optional(v.string()),
+});
+
+type BatchSelection = {
+  dayKey: string;
+  timeSlot: string;
+  state: "can-do" | "cant-do" | "maybe" | "blank";
+  isException?: boolean;
+  exceptionDate?: string;
+};
 
 function getDiscordDebounceMs(): number {
   const raw = process.env.DISCORD_DEBOUNCE_MS;
@@ -22,12 +47,6 @@ async function notifyDiscordIfLockedImpacted(
   scheduleId: Id<"schedules">,
   affectedCells: { dayKey: string; timeSlot: string }[]
 ) {
-  const links = await ctx.db
-    .query("scheduleDiscordLinks")
-    .withIndex("by_schedule", (q) => q.eq("scheduleId", scheduleId))
-    .collect();
-  if (links.length === 0) return;
-
   const schedule = await ctx.db.get(scheduleId);
   if (!schedule) return;
   const locked = schedule.lockedSlots ?? [];
@@ -39,6 +58,13 @@ async function notifyDiscordIfLockedImpacted(
   );
   if (!anyOverlap) return;
 
+  return await processDiscordLockedImpactBatch(ctx, scheduleId, null);
+}
+
+async function queueDiscordUpdatesForLinks(
+  ctx: MutationCtx,
+  links: Doc<"scheduleDiscordLinks">[]
+) {
   const debounceMs = getDiscordDebounceMs();
   for (const link of links) {
     if (link.pendingScheduledId) {
@@ -55,6 +81,35 @@ async function notifyDiscordIfLockedImpacted(
     );
     await ctx.db.patch(link._id, { pendingScheduledId: newId });
   }
+}
+
+async function processDiscordLockedImpactBatch(
+  ctx: MutationCtx,
+  scheduleId: Id<"schedules">,
+  cursor: string | null
+) {
+  const schedule = await ctx.db.get(scheduleId);
+  if (!schedule) return { processed: 0, scheduled: false };
+
+  const page = await ctx.db
+    .query("scheduleDiscordLinks")
+    .withIndex("by_schedule", (q) => q.eq("scheduleId", scheduleId))
+    .paginate({ numItems: DISCORD_LINK_NOTIFY_BATCH_SIZE, cursor });
+
+  await queueDiscordUpdatesForLinks(ctx, page.page);
+
+  if (!page.isDone) {
+    await ctx.scheduler.runAfter(
+      0,
+      internal.selections.continueDiscordLockedImpactNotify,
+      {
+        scheduleId,
+        cursor: page.continueCursor,
+      }
+    );
+  }
+
+  return { processed: page.page.length, scheduled: !page.isDone };
 }
 
 // Helper: check if a profile is blocked from a schedule
@@ -147,6 +202,24 @@ async function isParticipationDenied(
   return await isProfileBlocked(ctx, scheduleId, profileId);
 }
 
+async function hasBatchInvalidationSince(
+  ctx: MutationCtx,
+  scheduleId: Id<"schedules">,
+  profileId: Id<"userProfiles">,
+  batchStartedAt: number
+): Promise<boolean> {
+  const invalidation = await ctx.db
+    .query("selectionBatchInvalidations")
+    .withIndex("by_schedule_profile_invalidatedAt", (q) =>
+      q
+        .eq("scheduleId", scheduleId)
+        .eq("profileId", profileId)
+        .gte("invalidatedAt", batchStartedAt)
+    )
+    .first();
+  return invalidation !== null;
+}
+
 // Helper: check if a slot is in the schedule's disallowed list
 function isSlotDisallowed(
   disallowedSlots: { dayKey: string; timeSlot: string }[] | undefined,
@@ -157,6 +230,54 @@ function isSlotDisallowed(
   return disallowedSlots.some(
     (s) => s.dayKey === dayKey && s.timeSlot === timeSlot
   );
+}
+
+async function getExistingSelectionsForCell(
+  ctx: MutationCtx,
+  scheduleId: Id<"schedules">,
+  profileId: Id<"userProfiles">,
+  dayKey: string,
+  timeSlot: string,
+  isException: boolean | undefined,
+  exceptionDate: string | undefined
+) {
+  const queryCell = (exceptionValue: true | false | undefined) =>
+    ctx.db.query("selections").withIndex(
+      "by_profile_schedule_day_time_isException_exceptionDate",
+      (q) =>
+        q
+          .eq("profileId", profileId)
+          .eq("scheduleId", scheduleId)
+          .eq("dayKey", dayKey)
+          .eq("timeSlot", timeSlot)
+          .eq("isException", exceptionValue)
+          .eq("exceptionDate", exceptionDate)
+    );
+
+  if (isException) {
+    return await queryCell(true).take(10);
+  }
+
+  const [missingExceptionFlag, falseExceptionFlag] = await Promise.all([
+    queryCell(undefined).take(10),
+    queryCell(false).take(10),
+  ]);
+
+  return [...missingExceptionFlag, ...falseExceptionFlag];
+}
+
+function compactSelections(selections: BatchSelection[]): BatchSelection[] {
+  const byCell = new Map<string, BatchSelection>();
+  for (const selection of selections) {
+    const key = [
+      selection.dayKey,
+      selection.timeSlot,
+      selection.isException === true ? "exception" : "base",
+      selection.exceptionDate ?? "",
+    ].join("|");
+    byCell.set(key, selection);
+  }
+  return [...byCell.values()];
 }
 
 // Helper: check if this profile has a linked availability for this schedule
@@ -291,39 +412,28 @@ export const set = mutation({
     }
 
     // Find existing selection(s) for this cell
-    const existing = await ctx.db
-      .query("selections")
-      .withIndex("by_schedule_profile", (q) =>
-        q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
-      )
-      .filter((q) =>
-        q.and(
-          q.eq(q.field("dayKey"), args.dayKey),
-          q.eq(q.field("timeSlot"), args.timeSlot),
-          args.isException
-            ? q.eq(q.field("isException"), true)
-            : q.neq(q.field("isException"), true),
-          args.exceptionDate
-            ? q.eq(q.field("exceptionDate"), args.exceptionDate)
-            : q.eq(q.field("exceptionDate"), undefined)
-        )
-      )
-      .take(10);
+    const existing = await getExistingSelectionsForCell(
+      ctx,
+      args.scheduleId,
+      args.profileId,
+      args.dayKey,
+      args.timeSlot,
+      args.isException,
+      args.exceptionDate
+    );
 
     // Create override if overwriting a calendar-synced selection
     for (const sel of existing) {
       if (sel.source === "calendar" && sel.externalEventId) {
         const overrideExists = await ctx.db
           .query("calendarOverrides")
-          .withIndex("by_profile_schedule", (q) =>
-            q.eq("profileId", args.profileId).eq("scheduleId", args.scheduleId)
-          )
-          .filter((q) =>
-            q.and(
-              q.eq(q.field("externalEventId"), sel.externalEventId!),
-              q.eq(q.field("dayKey"), args.dayKey),
-              q.eq(q.field("timeSlot"), args.timeSlot)
-            )
+          .withIndex("by_profile_schedule_externalEventId_dayKey_timeSlot", (q) =>
+            q
+              .eq("profileId", args.profileId)
+              .eq("scheduleId", args.scheduleId)
+              .eq("externalEventId", sel.externalEventId!)
+              .eq("dayKey", args.dayKey)
+              .eq("timeSlot", args.timeSlot)
           )
           .first();
         if (!overrideExists) {
@@ -438,39 +548,28 @@ export const remove = mutation({
       }
     }
 
-    const existing = await ctx.db
-      .query("selections")
-      .withIndex("by_schedule_profile", (q) =>
-        q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
-      )
-      .filter((q) =>
-        q.and(
-          q.eq(q.field("dayKey"), args.dayKey),
-          q.eq(q.field("timeSlot"), args.timeSlot),
-          args.isException
-            ? q.eq(q.field("isException"), true)
-            : q.neq(q.field("isException"), true),
-          args.exceptionDate
-            ? q.eq(q.field("exceptionDate"), args.exceptionDate)
-            : q.eq(q.field("exceptionDate"), undefined)
-        )
-      )
-      .take(10);
+    const existing = await getExistingSelectionsForCell(
+      ctx,
+      args.scheduleId,
+      args.profileId,
+      args.dayKey,
+      args.timeSlot,
+      args.isException,
+      args.exceptionDate
+    );
 
     // Create override if removing a calendar-synced selection
     for (const record of existing) {
       if (record.source === "calendar" && record.externalEventId) {
         const overrideExists = await ctx.db
           .query("calendarOverrides")
-          .withIndex("by_profile_schedule", (q) =>
-            q.eq("profileId", args.profileId).eq("scheduleId", args.scheduleId)
-          )
-          .filter((q) =>
-            q.and(
-              q.eq(q.field("externalEventId"), record.externalEventId!),
-              q.eq(q.field("dayKey"), args.dayKey),
-              q.eq(q.field("timeSlot"), args.timeSlot)
-            )
+          .withIndex("by_profile_schedule_externalEventId_dayKey_timeSlot", (q) =>
+            q
+              .eq("profileId", args.profileId)
+              .eq("scheduleId", args.scheduleId)
+              .eq("externalEventId", record.externalEventId!)
+              .eq("dayKey", args.dayKey)
+              .eq("timeSlot", args.timeSlot)
           )
           .first();
         if (!overrideExists) {
@@ -495,220 +594,290 @@ export const remove = mutation({
   },
 });
 
+async function applySelectionCell(
+  ctx: MutationCtx,
+  args: {
+    scheduleId: Id<"schedules">;
+    profileId: Id<"userProfiles">;
+    timezone: string;
+    selection: BatchSelection;
+  }
+) {
+  const sel = args.selection;
+  const existing = await getExistingSelectionsForCell(
+    ctx,
+    args.scheduleId,
+    args.profileId,
+    sel.dayKey,
+    sel.timeSlot,
+    sel.isException,
+    sel.exceptionDate
+  );
+
+  if (sel.state === "blank") {
+    for (const record of existing) {
+      await ctx.db.delete(record._id);
+    }
+  } else if (existing.length > 0) {
+    await ctx.db.patch(existing[0]._id, {
+      state: sel.state,
+      timezone: args.timezone,
+    });
+    for (let i = 1; i < existing.length; i++) {
+      await ctx.db.delete(existing[i]._id);
+    }
+  } else {
+    await ctx.db.insert("selections", {
+      scheduleId: args.scheduleId,
+      profileId: args.profileId,
+      dayKey: sel.dayKey,
+      timeSlot: sel.timeSlot,
+      timezone: args.timezone,
+      state: sel.state,
+      isException: sel.isException,
+      exceptionDate: sel.exceptionDate,
+    });
+  }
+}
+
+async function processBatchSetSelections(
+  ctx: MutationCtx,
+  args: {
+    scheduleId: Id<"schedules">;
+    profileId: Id<"userProfiles">;
+    timezone: string;
+    selections: BatchSelection[];
+    actorIsCreator: boolean;
+    batchStartedAt: number;
+  }
+) {
+  const selections = compactSelections(args.selections);
+  const chunk = selections.slice(0, BATCH_SET_SELECTION_LIMIT);
+  const remaining = selections.slice(BATCH_SET_SELECTION_LIMIT);
+  if (chunk.length === 0) return { processed: 0, scheduled: 0 };
+
+  const [schedule, targetProfile, invalidated] = await Promise.all([
+    ctx.db.get(args.scheduleId),
+    ctx.db.get(args.profileId),
+    hasBatchInvalidationSince(
+      ctx,
+      args.scheduleId,
+      args.profileId,
+      args.batchStartedAt
+    ),
+  ]);
+  if (!schedule || !targetProfile || invalidated) {
+    return { processed: 0, scheduled: 0 };
+  }
+
+  if (
+    await isParticipationDenied(
+      ctx,
+      args.scheduleId,
+      args.profileId,
+      args.actorIsCreator
+    )
+  ) {
+    return { processed: 0, scheduled: 0 };
+  }
+
+  let disallowed = schedule.disallowedSlots;
+
+  // Creator bypass: auto-allow nominated disallowed cells across the full request.
+  if (args.actorIsCreator && disallowed && disallowed.length > 0) {
+    const slotsToAllow = selections.filter(
+      (s) => s.state !== "blank" && isSlotDisallowed(disallowed, s.dayKey, s.timeSlot)
+    );
+    if (slotsToAllow.length > 0) {
+      const allowSet = new Set(
+        slotsToAllow.map((s) => `${s.dayKey}|${s.timeSlot}`)
+      );
+      disallowed = disallowed.filter(
+        (s) => !allowSet.has(`${s.dayKey}|${s.timeSlot}`)
+      );
+      await ctx.db.patch(args.scheduleId, { disallowedSlots: disallowed });
+    }
+    disallowed = undefined;
+  }
+
+  const isInDateRange = (dayKey: string): boolean => {
+    if (schedule.type !== "one-off") return true;
+    if (!schedule.dateRangeStart || !schedule.dateRangeEnd) return true;
+    return dayKey >= schedule.dateRangeStart && dayKey <= schedule.dateRangeEnd;
+  };
+
+  const link = await getAvailabilityLink(
+    ctx,
+    args.scheduleId,
+    args.profileId
+  );
+
+  if (link) {
+    const savedAvail = await ctx.db.get(link.savedAvailabilityId);
+    if (savedAvail) {
+      let slots = [...savedAvail.slots];
+      const nonExceptionSels = chunk.filter(
+        (s) =>
+          !s.isException &&
+          !isSlotDisallowed(disallowed, s.dayKey, s.timeSlot) &&
+          isInDateRange(s.dayKey)
+      );
+
+      for (const sel of nonExceptionSels) {
+        slots = slots.filter(
+          (s) => !(s.dayKey === sel.dayKey && s.timeSlot === sel.timeSlot)
+        );
+        if (sel.state !== "blank") {
+          slots.push({
+            dayKey: sel.dayKey,
+            timeSlot: sel.timeSlot,
+            state: sel.state,
+          });
+        }
+      }
+
+      if (nonExceptionSels.length > 0) {
+        await ctx.db.patch(link.savedAvailabilityId, {
+          slots,
+          timezone: args.timezone,
+        });
+      }
+    }
+
+    for (const sel of chunk.filter((s) => s.isException)) {
+      if (isSlotDisallowed(disallowed, sel.dayKey, sel.timeSlot)) continue;
+      if (!isInDateRange(sel.dayKey)) continue;
+      await applySelectionCell(ctx, {
+        scheduleId: args.scheduleId,
+        profileId: args.profileId,
+        timezone: args.timezone,
+        selection: sel,
+      });
+    }
+  } else {
+    for (const sel of chunk) {
+      if (isSlotDisallowed(disallowed, sel.dayKey, sel.timeSlot)) continue;
+      if (!isInDateRange(sel.dayKey)) continue;
+      await applySelectionCell(ctx, {
+        scheduleId: args.scheduleId,
+        profileId: args.profileId,
+        timezone: args.timezone,
+        selection: sel,
+      });
+    }
+  }
+
+  if (remaining.length > 0) {
+    await ctx.scheduler.runAfter(0, internal.selections.continueBatchSet, {
+      scheduleId: args.scheduleId,
+      profileId: args.profileId,
+      timezone: args.timezone,
+      selections: remaining,
+      actorIsCreator: args.actorIsCreator,
+      batchStartedAt: args.batchStartedAt,
+    });
+  }
+
+  await notifyDiscordIfLockedImpacted(
+    ctx,
+    args.scheduleId,
+    chunk.map((s) => ({ dayKey: s.dayKey, timeSlot: s.timeSlot }))
+  );
+
+  return { processed: chunk.length, scheduled: remaining.length };
+}
+
 // Batch set selections (for drag operations)
 export const batchSet = mutation({
   args: {
     scheduleId: v.id("schedules"),
     profileId: v.id("userProfiles"),
     timezone: v.string(),
-    selections: v.array(
-      v.object({
-        dayKey: v.string(),
-        timeSlot: v.string(),
-        state: v.union(
-          v.literal("can-do"),
-          v.literal("cant-do"),
-          v.literal("maybe"),
-          v.literal("blank")
-        ),
-        isException: v.optional(v.boolean()),
-        exceptionDate: v.optional(v.string()),
-      })
-    ),
+    selections: v.array(batchSelectionValidator),
     anonymousId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const batchStartedAt = Date.now();
     const access = await getSelectionAccess(
       ctx,
       args.scheduleId,
       args.profileId,
       args.anonymousId
     );
-    if (!access) return;
+    if (!access) return { processed: 0, scheduled: 0 };
 
     // Guard: reject if participation denied (closed or blocked)
     if (await isParticipationDenied(ctx, args.scheduleId, args.profileId, access.actorIsCreator)) {
-      return;
+      return { processed: 0, scheduled: 0 };
     }
 
-    // Load schedule once to check disallowed slots and date range
-    const schedule = access.schedule;
-    let disallowed = schedule?.disallowedSlots;
+    return await processBatchSetSelections(ctx, {
+      scheduleId: args.scheduleId,
+      profileId: args.profileId,
+      timezone: args.timezone,
+      selections: args.selections,
+      actorIsCreator: access.actorIsCreator,
+      batchStartedAt,
+    });
+  },
+});
 
-    // Creator bypass: auto-allow disallowed cells being nominated, skip check for all
-    if (access.actorIsCreator && disallowed && disallowed.length > 0) {
-      const slotsToAllow = args.selections.filter(
-        (s) => s.state !== "blank" && isSlotDisallowed(disallowed, s.dayKey, s.timeSlot)
-      );
-      if (slotsToAllow.length > 0) {
-        const allowSet = new Set(
-          slotsToAllow.map((s) => `${s.dayKey}|${s.timeSlot}`)
-        );
-        disallowed = disallowed.filter(
-          (s) => !allowSet.has(`${s.dayKey}|${s.timeSlot}`)
-        );
-        await ctx.db.patch(args.scheduleId, { disallowedSlots: disallowed });
-      }
-      disallowed = undefined;
-    }
-
-    // Helper to check if a dayKey is within one-off schedule date range
-    const isInDateRange = (dayKey: string): boolean => {
-      if (schedule?.type !== "one-off") return true;
-      if (!schedule.dateRangeStart || !schedule.dateRangeEnd) return true;
-      return dayKey >= schedule.dateRangeStart && dayKey <= schedule.dateRangeEnd;
-    };
-
-    // Check for linked availability
-    const link = await getAvailabilityLink(
+export const continueDiscordLockedImpactNotify = internalMutation({
+  args: {
+    scheduleId: v.id("schedules"),
+    cursor: v.union(v.string(), v.null()),
+  },
+  handler: async (ctx, args) => {
+    return await processDiscordLockedImpactBatch(
       ctx,
       args.scheduleId,
-      args.profileId
-    );
-
-    // If linked, batch update saved availability for non-exception cells
-    if (link) {
-      const savedAvail = await ctx.db.get(link.savedAvailabilityId);
-      if (savedAvail) {
-        let slots = [...savedAvail.slots];
-        const nonExceptionSels = args.selections.filter(
-          (s) => !s.isException && !isSlotDisallowed(disallowed, s.dayKey, s.timeSlot) && isInDateRange(s.dayKey)
-        );
-
-        for (const sel of nonExceptionSels) {
-          slots = slots.filter(
-            (s) => !(s.dayKey === sel.dayKey && s.timeSlot === sel.timeSlot)
-          );
-          if (sel.state !== "blank") {
-            slots.push({
-              dayKey: sel.dayKey,
-              timeSlot: sel.timeSlot,
-              state: sel.state,
-            });
-          }
-        }
-
-        if (nonExceptionSels.length > 0) {
-          await ctx.db.patch(link.savedAvailabilityId, {
-            slots,
-            timezone: args.timezone,
-          });
-        }
-      }
-
-      // Handle exception cells normally (fall through below)
-      const exceptionSels = args.selections.filter((s) => s.isException);
-      for (const sel of exceptionSels) {
-        if (isSlotDisallowed(disallowed, sel.dayKey, sel.timeSlot)) continue;
-
-        const existing = await ctx.db
-          .query("selections")
-          .withIndex("by_schedule_profile", (q) =>
-            q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
-          )
-          .filter((q) =>
-            q.and(
-              q.eq(q.field("dayKey"), sel.dayKey),
-              q.eq(q.field("timeSlot"), sel.timeSlot),
-              q.eq(q.field("isException"), true),
-              sel.exceptionDate
-                ? q.eq(q.field("exceptionDate"), sel.exceptionDate)
-                : q.eq(q.field("exceptionDate"), undefined)
-            )
-          )
-          .take(10);
-
-        if (sel.state === "blank") {
-          for (const record of existing) {
-            await ctx.db.delete(record._id);
-          }
-        } else if (existing.length > 0) {
-          await ctx.db.patch(existing[0]._id, {
-            state: sel.state,
-            timezone: args.timezone,
-          });
-          for (let i = 1; i < existing.length; i++) {
-            await ctx.db.delete(existing[i]._id);
-          }
-        } else {
-          await ctx.db.insert("selections", {
-            scheduleId: args.scheduleId,
-            profileId: args.profileId,
-            dayKey: sel.dayKey,
-            timeSlot: sel.timeSlot,
-            timezone: args.timezone,
-            state: sel.state,
-            isException: sel.isException,
-            exceptionDate: sel.exceptionDate,
-          });
-        }
-      }
-      await notifyDiscordIfLockedImpacted(
-        ctx,
-        args.scheduleId,
-        args.selections.map((s) => ({ dayKey: s.dayKey, timeSlot: s.timeSlot }))
-      );
-      return;
-    }
-
-    // Not linked — original behavior
-    for (const sel of args.selections) {
-      if (isSlotDisallowed(disallowed, sel.dayKey, sel.timeSlot) || !isInDateRange(sel.dayKey)) {
-        continue;
-      }
-
-      const existing = await ctx.db
-        .query("selections")
-        .withIndex("by_schedule_profile", (q) =>
-          q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
-        )
-        .filter((q) =>
-          q.and(
-            q.eq(q.field("dayKey"), sel.dayKey),
-            q.eq(q.field("timeSlot"), sel.timeSlot),
-            sel.isException
-              ? q.eq(q.field("isException"), true)
-              : q.neq(q.field("isException"), true),
-            sel.exceptionDate
-              ? q.eq(q.field("exceptionDate"), sel.exceptionDate)
-              : q.eq(q.field("exceptionDate"), undefined)
-          )
-        )
-        .take(10);
-
-      if (sel.state === "blank") {
-        for (const record of existing) {
-          await ctx.db.delete(record._id);
-        }
-      } else if (existing.length > 0) {
-        await ctx.db.patch(existing[0]._id, {
-          state: sel.state,
-          timezone: args.timezone,
-        });
-        for (let i = 1; i < existing.length; i++) {
-          await ctx.db.delete(existing[i]._id);
-        }
-      } else {
-        await ctx.db.insert("selections", {
-          scheduleId: args.scheduleId,
-          profileId: args.profileId,
-          dayKey: sel.dayKey,
-          timeSlot: sel.timeSlot,
-          timezone: args.timezone,
-          state: sel.state,
-          isException: sel.isException,
-          exceptionDate: sel.exceptionDate,
-        });
-      }
-    }
-
-    await notifyDiscordIfLockedImpacted(
-      ctx,
-      args.scheduleId,
-      args.selections.map((s) => ({ dayKey: s.dayKey, timeSlot: s.timeSlot }))
+      args.cursor
     );
   },
 });
+
+export const continueBatchSet = internalMutation({
+  args: {
+    scheduleId: v.id("schedules"),
+    profileId: v.id("userProfiles"),
+    timezone: v.string(),
+    selections: v.array(batchSelectionValidator),
+    actorIsCreator: v.boolean(),
+    batchStartedAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    return await processBatchSetSelections(ctx, args);
+  },
+});
+
+async function deleteSelectionsForProfileBatch(
+  ctx: MutationCtx,
+  scheduleId: Id<"schedules">,
+  profileId: Id<"userProfiles">
+) {
+  const batch = await ctx.db
+    .query("selections")
+    .withIndex("by_schedule_profile", (q) =>
+      q.eq("scheduleId", scheduleId).eq("profileId", profileId)
+    )
+    .take(SELECTION_DELETE_BATCH_SIZE);
+
+  for (const record of batch) {
+    await ctx.db.delete(record._id);
+  }
+
+  if (batch.length === SELECTION_DELETE_BATCH_SIZE) {
+    await ctx.scheduler.runAfter(0, internal.selections.continueClearForProfile, {
+      scheduleId,
+      profileId,
+    });
+  }
+
+  return {
+    deleted: batch.length,
+    scheduled: batch.length === SELECTION_DELETE_BATCH_SIZE,
+  };
+}
 
 // Clear all selections for a profile on a schedule
 // Also unlinks any saved availability (without copying back)
@@ -725,7 +894,7 @@ export const clearForProfile = mutation({
       args.profileId,
       args.anonymousId
     );
-    if (!access) return 0;
+    if (!access) return { deleted: 0, scheduled: false };
 
     // If linked to a saved availability, unlink without copying back
     const link = await getAvailabilityLink(
@@ -737,24 +906,25 @@ export const clearForProfile = mutation({
       await ctx.db.delete(link._id);
     }
 
-    // Fetch in batches and delete
-    let deleted = 0;
-    while (true) {
-      const batch = await ctx.db
-        .query("selections")
-        .withIndex("by_schedule_profile", (q) =>
-          q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
-        )
-        .take(100);
+    return await deleteSelectionsForProfileBatch(
+      ctx,
+      args.scheduleId,
+      args.profileId
+    );
+  },
+});
 
-      if (batch.length === 0) break;
-
-      for (const record of batch) {
-        await ctx.db.delete(record._id);
-        deleted++;
-      }
-    }
-    return deleted;
+export const continueClearForProfile = internalMutation({
+  args: {
+    scheduleId: v.id("schedules"),
+    profileId: v.id("userProfiles"),
+  },
+  handler: async (ctx, args) => {
+    return await deleteSelectionsForProfileBatch(
+      ctx,
+      args.scheduleId,
+      args.profileId
+    );
   },
 });
 
@@ -765,6 +935,6 @@ export const getBySchedule = query({
     return await ctx.db
       .query("selections")
       .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
-      .collect();
+      .take(SELECTIONS_BY_SCHEDULE_LIMIT);
   },
 });

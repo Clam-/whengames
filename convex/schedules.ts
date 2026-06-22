@@ -1,5 +1,11 @@
 import { v } from "convex/values";
-import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
+import {
+  internalMutation,
+  mutation,
+  query,
+  MutationCtx,
+  QueryCtx,
+} from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 
@@ -8,6 +14,9 @@ const SCHEDULE_LIST_LIMIT = 100;
 const SCHEDULE_DETAIL_SELECTION_LIMIT = 5000;
 const SCHEDULE_DETAIL_LINK_LIMIT = 500;
 const SCHEDULE_DETAIL_BLOCKED_PROFILE_LIMIT = 1000;
+const SCHEDULE_CLEANUP_BATCH_SIZE = 500;
+const SCHEDULE_TYPE_CONVERSION_SELECTION_LIMIT = 5000;
+const DISCORD_LINK_NOTIFY_BATCH_SIZE = 100;
 
 function getDiscordDebounceMs(): number {
   const raw = process.env.DISCORD_DEBOUNCE_MS;
@@ -21,11 +30,13 @@ async function notifyDiscordForceQueue(
   ctx: MutationCtx,
   scheduleId: Id<"schedules">
 ) {
-  const links = await ctx.db
-    .query("scheduleDiscordLinks")
-    .withIndex("by_schedule", (q) => q.eq("scheduleId", scheduleId))
-    .collect();
-  if (links.length === 0) return;
+  return await processDiscordForceQueueBatch(ctx, scheduleId, null);
+}
+
+async function queueDiscordUpdatesForLinks(
+  ctx: MutationCtx,
+  links: Doc<"scheduleDiscordLinks">[]
+) {
   const debounceMs = getDiscordDebounceMs();
   for (const link of links) {
     if (link.pendingScheduledId) {
@@ -43,6 +54,61 @@ async function notifyDiscordForceQueue(
     await ctx.db.patch(link._id, { pendingScheduledId: newId });
   }
 }
+
+async function processDiscordForceQueueBatch(
+  ctx: MutationCtx,
+  scheduleId: Id<"schedules">,
+  cursor: string | null
+) {
+  const schedule = await ctx.db.get(scheduleId);
+  if (!schedule) return { processed: 0, scheduled: false };
+
+  const page = await ctx.db
+    .query("scheduleDiscordLinks")
+    .withIndex("by_schedule", (q) => q.eq("scheduleId", scheduleId))
+    .paginate({ numItems: DISCORD_LINK_NOTIFY_BATCH_SIZE, cursor });
+
+  await queueDiscordUpdatesForLinks(ctx, page.page);
+
+  if (!page.isDone) {
+    await ctx.scheduler.runAfter(
+      0,
+      internal.schedules.continueDiscordForceQueue,
+      {
+        scheduleId,
+        cursor: page.continueCursor,
+      }
+    );
+  }
+
+  return { processed: page.page.length, scheduled: !page.isDone };
+}
+
+async function invalidateSelectionBatchesForProfile(
+  ctx: MutationCtx,
+  scheduleId: Id<"schedules">,
+  profileId: Id<"userProfiles">
+) {
+  await ctx.db.insert("selectionBatchInvalidations", {
+    scheduleId,
+    profileId,
+    invalidatedAt: Date.now(),
+  });
+}
+
+export const continueDiscordForceQueue = internalMutation({
+  args: {
+    scheduleId: v.id("schedules"),
+    cursor: v.union(v.string(), v.null()),
+  },
+  handler: async (ctx, args) => {
+    return await processDiscordForceQueueBatch(
+      ctx,
+      args.scheduleId,
+      args.cursor
+    );
+  },
+});
 
 /**
  * Get the JS day-of-week (0=Sunday, 6=Saturday) from an ISO date string.
@@ -412,7 +478,13 @@ export const update = mutation({
       const selections = await ctx.db
         .query("selections")
         .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
-        .collect();
+        .take(SCHEDULE_TYPE_CONVERSION_SELECTION_LIMIT + 1);
+
+      if (selections.length > SCHEDULE_TYPE_CONVERSION_SELECTION_LIMIT) {
+        throw new Error(
+          "This schedule has too many selections to convert from one-off to recurring in one edit."
+        );
+      }
 
       // Group by (profileId, dow, timeSlot) to resolve conflicts
       const selectionMap = new Map<
@@ -520,6 +592,91 @@ export const update = mutation({
   },
 });
 
+async function cleanupRemovedScheduleBatch(
+  ctx: MutationCtx,
+  scheduleId: Id<"schedules">
+) {
+  const selections = await ctx.db
+    .query("selections")
+    .withIndex("by_schedule", (q) => q.eq("scheduleId", scheduleId))
+    .take(SCHEDULE_CLEANUP_BATCH_SIZE);
+  for (const sel of selections) {
+    await ctx.db.delete(sel._id);
+  }
+
+  const links = await ctx.db
+    .query("availabilityLinks")
+    .withIndex("by_scheduleId", (q) => q.eq("scheduleId", scheduleId))
+    .take(SCHEDULE_CLEANUP_BATCH_SIZE);
+  for (const link of links) {
+    await ctx.db.delete(link._id);
+  }
+
+  const blocked = await ctx.db
+    .query("blockedProfiles")
+    .withIndex("by_schedule", (q) => q.eq("scheduleId", scheduleId))
+    .take(SCHEDULE_CLEANUP_BATCH_SIZE);
+  for (const record of blocked) {
+    await ctx.db.delete(record._id);
+  }
+
+  const dstLogs = await ctx.db
+    .query("dstCheckLog")
+    .withIndex("by_schedule_profile_date", (q) => q.eq("scheduleId", scheduleId))
+    .take(SCHEDULE_CLEANUP_BATCH_SIZE);
+  for (const log of dstLogs) {
+    await ctx.db.delete(log._id);
+  }
+
+  const discordLinks = await ctx.db
+    .query("scheduleDiscordLinks")
+    .withIndex("by_schedule", (q) => q.eq("scheduleId", scheduleId))
+    .take(SCHEDULE_CLEANUP_BATCH_SIZE);
+  for (const link of discordLinks) {
+    if (link.pendingScheduledId) {
+      try {
+        await ctx.scheduler.cancel(link.pendingScheduledId);
+      } catch {
+        // already fired
+      }
+    }
+    await ctx.db.delete(link._id);
+  }
+
+  const invalidations = await ctx.db
+    .query("selectionBatchInvalidations")
+    .withIndex("by_schedule", (q) => q.eq("scheduleId", scheduleId))
+    .take(SCHEDULE_CLEANUP_BATCH_SIZE);
+  for (const invalidation of invalidations) {
+    await ctx.db.delete(invalidation._id);
+  }
+
+  const shouldContinue =
+    selections.length === SCHEDULE_CLEANUP_BATCH_SIZE ||
+    links.length === SCHEDULE_CLEANUP_BATCH_SIZE ||
+    blocked.length === SCHEDULE_CLEANUP_BATCH_SIZE ||
+    dstLogs.length === SCHEDULE_CLEANUP_BATCH_SIZE ||
+    discordLinks.length === SCHEDULE_CLEANUP_BATCH_SIZE ||
+    invalidations.length === SCHEDULE_CLEANUP_BATCH_SIZE;
+
+  if (shouldContinue) {
+    await ctx.scheduler.runAfter(0, internal.schedules.cleanupRemovedSchedule, {
+      scheduleId,
+    });
+  }
+
+  return {
+    deleted:
+      selections.length +
+      links.length +
+      blocked.length +
+      dstLogs.length +
+      discordLinks.length +
+      invalidations.length,
+    scheduled: shouldContinue,
+  };
+}
+
 // Delete a schedule and all related data (creator only)
 export const remove = mutation({
   args: {
@@ -531,60 +688,20 @@ export const remove = mutation({
     if (!schedule) return;
     await requireScheduleCreator(ctx, schedule, args.anonymousId);
 
-    // Delete all selections
-    const selections = await ctx.db
-      .query("selections")
-      .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
-      .collect();
-    for (const sel of selections) {
-      await ctx.db.delete(sel._id);
-    }
-
-    // Delete all availability links
-    const links = await ctx.db
-      .query("availabilityLinks")
-      .withIndex("by_scheduleId", (q) => q.eq("scheduleId", args.scheduleId))
-      .collect();
-    for (const link of links) {
-      await ctx.db.delete(link._id);
-    }
-
-    // Delete blocked profiles
-    const blocked = await ctx.db
-      .query("blockedProfiles")
-      .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
-      .collect();
-    for (const b of blocked) {
-      await ctx.db.delete(b._id);
-    }
-
-    // Delete DST check logs
-    const dstLogs = await ctx.db
-      .query("dstCheckLog")
-      .withIndex("by_schedule_profile_date", (q) => q.eq("scheduleId", args.scheduleId))
-      .collect();
-    for (const log of dstLogs) {
-      await ctx.db.delete(log._id);
-    }
-
-    // Delete Discord links + cancel any pending debounced sends
-    const discordLinks = await ctx.db
-      .query("scheduleDiscordLinks")
-      .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
-      .collect();
-    for (const link of discordLinks) {
-      if (link.pendingScheduledId) {
-        try {
-          await ctx.scheduler.cancel(link.pendingScheduledId);
-        } catch {
-          // already fired
-        }
-      }
-      await ctx.db.delete(link._id);
-    }
-
-    // Delete the schedule itself
     await ctx.db.delete(args.scheduleId);
+    await ctx.scheduler.runAfter(0, internal.schedules.cleanupRemovedSchedule, {
+      scheduleId: args.scheduleId,
+    });
+    return { scheduled: true };
+  },
+});
+
+export const cleanupRemovedSchedule = internalMutation({
+  args: {
+    scheduleId: v.id("schedules"),
+  },
+  handler: async (ctx, args) => {
+    return await cleanupRemovedScheduleBatch(ctx, args.scheduleId);
   },
 });
 
@@ -749,21 +866,16 @@ export const removeParticipant = mutation({
       await ctx.db.delete(link._id);
     }
 
-    // Delete all selections for this profile on this schedule
-    while (true) {
-      const batch = await ctx.db
-        .query("selections")
-        .withIndex("by_schedule_profile", (q) =>
-          q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
-        )
-        .take(100);
+    await invalidateSelectionBatchesForProfile(
+      ctx,
+      args.scheduleId,
+      args.profileId
+    );
 
-      if (batch.length === 0) break;
-
-      for (const record of batch) {
-        await ctx.db.delete(record._id);
-      }
-    }
+    await ctx.scheduler.runAfter(0, internal.selections.continueClearForProfile, {
+      scheduleId: args.scheduleId,
+      profileId: args.profileId,
+    });
 
     // Participant removal can impact locked-slot outcomes.
     if ((schedule?.lockedSlots ?? []).length > 0) {
@@ -819,21 +931,16 @@ export const blockParticipant = mutation({
       await ctx.db.delete(link._id);
     }
 
-    // Delete all selections for this profile on this schedule
-    while (true) {
-      const batch = await ctx.db
-        .query("selections")
-        .withIndex("by_schedule_profile", (q) =>
-          q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
-        )
-        .take(100);
+    await invalidateSelectionBatchesForProfile(
+      ctx,
+      args.scheduleId,
+      args.profileId
+    );
 
-      if (batch.length === 0) break;
-
-      for (const record of batch) {
-        await ctx.db.delete(record._id);
-      }
-    }
+    await ctx.scheduler.runAfter(0, internal.selections.continueClearForProfile, {
+      scheduleId: args.scheduleId,
+      profileId: args.profileId,
+    });
 
     if ((schedule?.lockedSlots ?? []).length > 0) {
       await notifyDiscordForceQueue(ctx, args.scheduleId);
@@ -880,7 +987,7 @@ export const getBlockedProfiles = query({
     const blocked = await ctx.db
       .query("blockedProfiles")
       .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
-      .collect();
+      .take(SCHEDULE_DETAIL_BLOCKED_PROFILE_LIMIT);
 
     // Enrich with profile info
     const enriched = await Promise.all(

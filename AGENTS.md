@@ -11,3 +11,5 @@ Convex agent skills for common tasks can be installed by running
 `npx convex ai-files install`.
 
 <!-- convex-ai-end -->
+
+When running `pnpm build`, always request elevated permissions because pnpm may perform package-manager or metadata network access before executing the local build script.
