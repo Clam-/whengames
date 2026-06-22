@@ -6,7 +6,8 @@ const crons = cronJobs();
 crons.cron(
   "dst-notification-check",
   "0 0 * * *",
-  internal.dstNotifications.checkUpcomingDstChanges
+  internal.dstNotifications.checkUpcomingDstChanges,
+  {}
 );
 
 crons.interval(

@@ -59,6 +59,7 @@ export function CreateScheduleModal({ onClose }: Props) {
         description: description.trim() || undefined,
         type,
         creatorProfileId: profileId,
+        anonymousId: anonymousId || undefined,
         dateRangeStart: type === "one-off" ? dateStart : undefined,
         dateRangeEnd: type === "one-off" ? dateEnd : undefined,
         recurringStartDate: type === "recurring" && recurringStartDate ? recurringStartDate : undefined,
@@ -218,12 +219,13 @@ export function CreateScheduleModal({ onClose }: Props) {
                 className="rounded text-blue-600"
               />
               <label htmlFor="is-private" className="text-sm text-gray-700 dark:text-slate-300">
-                Private schedule
+                Unlisted schedule
               </label>
             </div>
             {isPrivate && (
               <p className="text-xs text-gray-500 mt-1 ml-6 dark:text-slate-400">
-                Private schedules can still be viewed by anyone with the link to this schedule.
+                Unlisted schedules are hidden from the public list but can still
+                be viewed by anyone with the link.
               </p>
             )}
           </div>

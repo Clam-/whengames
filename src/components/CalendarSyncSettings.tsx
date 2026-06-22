@@ -12,7 +12,7 @@ interface CalendarSource {
   type: "google" | "ics";
   availableCalendars?: { id: string; summary: string }[];
   selectedCalendarIds?: string[];
-  icsUrl?: string;
+  hasIcsUrl?: boolean;
   lastSyncAt?: number;
   lastSyncStatus?: "success" | "error";
   lastSyncError?: string;
@@ -39,17 +39,9 @@ export function CalendarSyncSettings({ profileId, userEmail }: Props) {
   const removeSourceMut = useMutation(api.calendarSources.removeSource);
 
   const [icsUrl, setIcsUrl] = useState("");
-  const [icsUrlInitialized, setIcsUrlInitialized] = useState(false);
 
   const googleSource = (sources as CalendarSource[] | undefined)?.find((s: CalendarSource) => s.type === "google");
   const icsSource = (sources as CalendarSource[] | undefined)?.find((s: CalendarSource) => s.type === "ics");
-
-  useEffect(() => {
-    if (icsSource && !icsUrlInitialized) {
-      setIcsUrl(icsSource.icsUrl ?? "");
-      setIcsUrlInitialized(true);
-    }
-  }, [icsSource, icsUrlInitialized]);
 
   useEffect(() => {
     const flag = sessionStorage.getItem(CALENDAR_CONNECTED_KEY);
@@ -101,13 +93,13 @@ export function CalendarSyncSettings({ profileId, userEmail }: Props) {
     if (!trimmed) return;
     const normalized = trimmed.replace(/^webcal:\/\//, "https://");
     await saveIcsUrlMut({ profileId, icsUrl: normalized });
+    setIcsUrl("");
   }, [icsUrl, profileId, saveIcsUrlMut]);
 
   const handleRemoveIcs = useCallback(async () => {
     if (!icsSource) return;
     await removeSourceMut({ sourceId: icsSource._id });
     setIcsUrl("");
-    setIcsUrlInitialized(false);
   }, [icsSource, removeSourceMut]);
 
   const isValidUrl = (url: string) => {
@@ -205,7 +197,11 @@ export function CalendarSyncSettings({ profileId, userEmail }: Props) {
             type="text"
             value={icsUrl}
             onChange={(e) => setIcsUrl(e.target.value)}
-            placeholder="https://example.com/calendar.ics"
+            placeholder={
+              icsSource?.hasIcsUrl
+                ? "Paste new URL to replace current calendar"
+                : "https://example.com/calendar.ics"
+            }
             className={`flex-1 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-400 ${
               !isValidUrl(icsUrl) ? "border-red-300" : "border-gray-300"
             }`}
@@ -215,9 +211,14 @@ export function CalendarSyncSettings({ profileId, userEmail }: Props) {
             disabled={!icsUrl.trim() || !isValidUrl(icsUrl)}
             className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            Save
+            {icsSource?.hasIcsUrl ? "Replace" : "Save"}
           </button>
         </div>
+        {icsSource?.hasIcsUrl && (
+          <p className="text-xs text-gray-400 mt-1 dark:text-slate-500">
+            ICS calendar connected.
+          </p>
+        )}
         {!isValidUrl(icsUrl) && (
           <p className="text-xs text-red-500 mt-1 dark:text-rose-400">
             URL must start with https:// or webcal://

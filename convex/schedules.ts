@@ -1,9 +1,14 @@
 import { v } from "convex/values";
-import { mutation, query, MutationCtx } from "./_generated/server";
+import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { Id } from "./_generated/dataModel";
+import { Doc, Id } from "./_generated/dataModel";
 
 const DEFAULT_DISCORD_DEBOUNCE_MS = 5 * 60 * 1000;
+const SCHEDULE_LIST_LIMIT = 100;
+const SCHEDULE_DETAIL_SELECTION_LIMIT = 5000;
+const SCHEDULE_DETAIL_LINK_LIMIT = 500;
+const SCHEDULE_DETAIL_BLOCKED_PROFILE_LIMIT = 1000;
+
 function getDiscordDebounceMs(): number {
   const raw = process.env.DISCORD_DEBOUNCE_MS;
   if (!raw) return DEFAULT_DISCORD_DEBOUNCE_MS;
@@ -50,22 +55,98 @@ function getDayOfWeekFromISODate(isoDate: string): number {
   return date.getUTCDay();
 }
 
+async function getCallerProfile(
+  ctx: MutationCtx | QueryCtx,
+  anonymousId?: string
+): Promise<Doc<"userProfiles"> | null> {
+  const identity = await ctx.auth.getUserIdentity();
+
+  if (identity) {
+    const profile = await ctx.db
+      .query("userProfiles")
+      .withIndex("by_authUserId", (q) =>
+        q.eq("authUserId", identity.tokenIdentifier)
+      )
+      .unique();
+    if (profile) return profile;
+  }
+
+  if (!anonymousId) return null;
+
+  return await ctx.db
+    .query("userProfiles")
+    .withIndex("by_anonymousId", (q) => q.eq("anonymousId", anonymousId))
+    .unique();
+}
+
+async function requireCallerProfile(
+  ctx: MutationCtx | QueryCtx,
+  anonymousId?: string
+): Promise<Doc<"userProfiles">> {
+  const profile = await getCallerProfile(ctx, anonymousId);
+  if (!profile) throw new Error("Unauthorized");
+  return profile;
+}
+
+async function requireScheduleCreator(
+  ctx: MutationCtx | QueryCtx,
+  schedule: Doc<"schedules">,
+  anonymousId?: string
+): Promise<Doc<"userProfiles">> {
+  const caller = await requireCallerProfile(ctx, anonymousId);
+  if (caller._id !== schedule.creatorProfileId) {
+    throw new Error("Unauthorized");
+  }
+  return caller;
+}
+
+async function canLockSchedule(
+  ctx: MutationCtx,
+  schedule: Doc<"schedules">,
+  anonymousId?: string
+): Promise<boolean> {
+  if (schedule.anyoneCanLock) return true;
+
+  const caller = await getCallerProfile(ctx, anonymousId);
+  if (!caller) return false;
+
+  return (
+    caller._id === schedule.creatorProfileId ||
+    (schedule.lockEditors ?? []).includes(caller._id)
+  );
+}
+
 // List all schedules (public)
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    const schedules = await ctx.db
+    const explicitlyPublicSchedules = await ctx.db
       .query("schedules")
-      .withIndex("by_createdAt")
+      .withIndex("by_isPrivate_and_createdAt", (q) =>
+        q.eq("isPrivate", false)
+      )
       .order("desc")
-      .collect();
+      .take(SCHEDULE_LIST_LIMIT);
 
-    // Filter out private schedules
-    const publicSchedules = schedules.filter((s) => !s.isPrivate);
+    const legacyPublicSchedules = await ctx.db
+      .query("schedules")
+      .withIndex("by_isPrivate_and_createdAt", (q) =>
+        q.eq("isPrivate", undefined)
+      )
+      .order("desc")
+      .take(SCHEDULE_LIST_LIMIT);
+
+    // Filter out unlisted schedules. Direct schedule links remain accessible.
+    const listedSchedules = [
+      ...explicitlyPublicSchedules,
+      ...legacyPublicSchedules,
+    ]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, SCHEDULE_LIST_LIMIT);
 
     // Enrich with creator profile info
     const enriched = await Promise.all(
-      publicSchedules.map(async (schedule) => {
+      listedSchedules.map(async (schedule) => {
         const creator = await ctx.db.get(schedule.creatorProfileId);
         // Prefer Convex-stored image over hotlinked Google URL
         const storedImageUrl = creator?.profileImageStorageId
@@ -96,13 +177,13 @@ export const get = query({
     let selections = await ctx.db
       .query("selections")
       .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
-      .collect();
+      .take(SCHEDULE_DETAIL_SELECTION_LIMIT);
 
     // Get availability links for this schedule
     const links = await ctx.db
       .query("availabilityLinks")
       .withIndex("by_scheduleId", (q) => q.eq("scheduleId", args.scheduleId))
-      .collect();
+      .take(SCHEDULE_DETAIL_LINK_LIMIT);
 
     const linkedProfileIds = new Set(links.map((l) => l.profileId.toString()));
 
@@ -222,7 +303,7 @@ export const get = query({
     const blockedProfiles = await ctx.db
       .query("blockedProfiles")
       .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
-      .collect();
+      .take(SCHEDULE_DETAIL_BLOCKED_PROFILE_LIMIT);
     const blockedProfileIds = blockedProfiles.map((b) => b.profileId as string);
 
     // Prefer Convex-stored image over hotlinked Google URL for creator
@@ -250,6 +331,7 @@ export const create = mutation({
     description: v.optional(v.string()),
     type: v.union(v.literal("one-off"), v.literal("recurring")),
     creatorProfileId: v.id("userProfiles"),
+    anonymousId: v.optional(v.string()),
     dateRangeStart: v.optional(v.string()),
     dateRangeEnd: v.optional(v.string()),
     recurringStartDate: v.optional(v.string()),
@@ -257,6 +339,11 @@ export const create = mutation({
     isPrivate: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
+    const caller = await requireCallerProfile(ctx, args.anonymousId);
+    if (caller._id !== args.creatorProfileId) {
+      throw new Error("Unauthorized");
+    }
+
     return await ctx.db.insert("schedules", {
       title: args.title,
       description: args.description,
@@ -276,6 +363,7 @@ export const create = mutation({
 export const update = mutation({
   args: {
     scheduleId: v.id("schedules"),
+    anonymousId: v.optional(v.string()),
     title: v.optional(v.string()),
     description: v.optional(v.string()),
     type: v.optional(v.union(v.literal("one-off"), v.literal("recurring"))),
@@ -287,6 +375,7 @@ export const update = mutation({
   handler: async (ctx, args) => {
     const schedule = await ctx.db.get(args.scheduleId);
     if (!schedule) return;
+    await requireScheduleCreator(ctx, schedule, args.anonymousId);
 
     const cleanUpdates: Record<string, unknown> = {};
     if (args.title !== undefined) cleanUpdates.title = args.title;
@@ -435,10 +524,12 @@ export const update = mutation({
 export const remove = mutation({
   args: {
     scheduleId: v.id("schedules"),
+    anonymousId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const schedule = await ctx.db.get(args.scheduleId);
     if (!schedule) return;
+    await requireScheduleCreator(ctx, schedule, args.anonymousId);
 
     // Delete all selections
     const selections = await ctx.db
@@ -502,6 +593,7 @@ export const remove = mutation({
 export const setDisallowedSlots = mutation({
   args: {
     scheduleId: v.id("schedules"),
+    anonymousId: v.optional(v.string()),
     slots: v.array(
       v.object({
         dayKey: v.string(),
@@ -512,6 +604,7 @@ export const setDisallowedSlots = mutation({
   handler: async (ctx, args) => {
     const schedule = await ctx.db.get(args.scheduleId);
     if (!schedule) return;
+    await requireScheduleCreator(ctx, schedule, args.anonymousId);
 
     // For one-off schedules, filter out slots outside date range
     let filteredSlots = args.slots;
@@ -549,7 +642,7 @@ export const setDisallowedSlots = mutation({
 export const setLockedSlots = mutation({
   args: {
     scheduleId: v.id("schedules"),
-    callerProfileId: v.optional(v.id("userProfiles")),
+    anonymousId: v.optional(v.string()),
     slots: v.array(
       v.object({
         dayKey: v.string(),
@@ -561,10 +654,8 @@ export const setLockedSlots = mutation({
     const schedule = await ctx.db.get(args.scheduleId);
     if (!schedule) return;
 
-    if (args.callerProfileId) {
-      const isCreator = schedule.creatorProfileId === args.callerProfileId;
-      const isLockEditor = schedule.lockEditors?.includes(args.callerProfileId);
-      if (!isCreator && !schedule.anyoneCanLock && !isLockEditor) return;
+    if (!(await canLockSchedule(ctx, schedule, args.anonymousId))) {
+      throw new Error("Unauthorized");
     }
 
     // Strip any disallowed slots from the lock request
@@ -597,10 +688,12 @@ export const setLockedSlots = mutation({
 export const clearDisallowedSlots = mutation({
   args: {
     scheduleId: v.id("schedules"),
+    anonymousId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const schedule = await ctx.db.get(args.scheduleId);
     if (!schedule) return;
+    await requireScheduleCreator(ctx, schedule, args.anonymousId);
 
     await ctx.db.patch(args.scheduleId, {
       disallowedSlots: [],
@@ -612,11 +705,13 @@ export const clearDisallowedSlots = mutation({
 export const setAcceptParticipation = mutation({
   args: {
     scheduleId: v.id("schedules"),
+    anonymousId: v.optional(v.string()),
     acceptParticipation: v.boolean(),
   },
   handler: async (ctx, args) => {
     const schedule = await ctx.db.get(args.scheduleId);
     if (!schedule) return;
+    await requireScheduleCreator(ctx, schedule, args.anonymousId);
 
     await ctx.db.patch(args.scheduleId, {
       acceptParticipation: args.acceptParticipation,
@@ -628,11 +723,15 @@ export const setAcceptParticipation = mutation({
 export const removeParticipant = mutation({
   args: {
     scheduleId: v.id("schedules"),
+    anonymousId: v.optional(v.string()),
     profileId: v.id("userProfiles"),
   },
   handler: async (ctx, args) => {
     // Remove from lock editors if present
     const schedule = await ctx.db.get(args.scheduleId);
+    if (!schedule) return;
+    await requireScheduleCreator(ctx, schedule, args.anonymousId);
+
     if (schedule?.lockEditors?.includes(args.profileId)) {
       await ctx.db.patch(args.scheduleId, {
         lockEditors: schedule.lockEditors.filter((id) => id !== args.profileId),
@@ -678,11 +777,15 @@ export const removeParticipant = mutation({
 export const blockParticipant = mutation({
   args: {
     scheduleId: v.id("schedules"),
+    anonymousId: v.optional(v.string()),
     profileId: v.id("userProfiles"),
   },
   handler: async (ctx, args) => {
     // Remove from lock editors if present
     const schedule = await ctx.db.get(args.scheduleId);
+    if (!schedule) return;
+    await requireScheduleCreator(ctx, schedule, args.anonymousId);
+
     if (schedule?.lockEditors?.includes(args.profileId)) {
       await ctx.db.patch(args.scheduleId, {
         lockEditors: schedule.lockEditors.filter((id) => id !== args.profileId),
@@ -742,9 +845,14 @@ export const blockParticipant = mutation({
 export const unblockParticipant = mutation({
   args: {
     scheduleId: v.id("schedules"),
+    anonymousId: v.optional(v.string()),
     profileId: v.id("userProfiles"),
   },
   handler: async (ctx, args) => {
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (!schedule) return;
+    await requireScheduleCreator(ctx, schedule, args.anonymousId);
+
     const blocked = await ctx.db
       .query("blockedProfiles")
       .withIndex("by_schedule_profile", (q) =>
@@ -760,8 +868,15 @@ export const unblockParticipant = mutation({
 
 // Get blocked profiles for a schedule
 export const getBlockedProfiles = query({
-  args: { scheduleId: v.id("schedules") },
+  args: {
+    scheduleId: v.id("schedules"),
+    anonymousId: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
+    const schedule = await ctx.db.get(args.scheduleId);
+    if (!schedule) return [];
+    await requireScheduleCreator(ctx, schedule, args.anonymousId);
+
     const blocked = await ctx.db
       .query("blockedProfiles")
       .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
@@ -791,16 +906,14 @@ export const getBlockedProfiles = query({
 export const clearLockedSlots = mutation({
   args: {
     scheduleId: v.id("schedules"),
-    callerProfileId: v.optional(v.id("userProfiles")),
+    anonymousId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const schedule = await ctx.db.get(args.scheduleId);
     if (!schedule) return;
 
-    if (args.callerProfileId) {
-      const isCreator = schedule.creatorProfileId === args.callerProfileId;
-      const isLockEditor = schedule.lockEditors?.includes(args.callerProfileId);
-      if (!isCreator && !schedule.anyoneCanLock && !isLockEditor) return;
+    if (!(await canLockSchedule(ctx, schedule, args.anonymousId))) {
+      throw new Error("Unauthorized");
     }
 
     await ctx.db.patch(args.scheduleId, {
@@ -816,11 +929,13 @@ export const clearLockedSlots = mutation({
 export const setAnyoneCanLock = mutation({
   args: {
     scheduleId: v.id("schedules"),
+    anonymousId: v.optional(v.string()),
     anyoneCanLock: v.boolean(),
   },
   handler: async (ctx, args) => {
     const schedule = await ctx.db.get(args.scheduleId);
     if (!schedule) return;
+    await requireScheduleCreator(ctx, schedule, args.anonymousId);
 
     await ctx.db.patch(args.scheduleId, {
       anyoneCanLock: args.anyoneCanLock || undefined,
@@ -832,11 +947,13 @@ export const setAnyoneCanLock = mutation({
 export const addLockEditor = mutation({
   args: {
     scheduleId: v.id("schedules"),
+    anonymousId: v.optional(v.string()),
     profileId: v.id("userProfiles"),
   },
   handler: async (ctx, args) => {
     const schedule = await ctx.db.get(args.scheduleId);
     if (!schedule) return;
+    await requireScheduleCreator(ctx, schedule, args.anonymousId);
 
     const editors = schedule.lockEditors || [];
     if (editors.includes(args.profileId)) return;
@@ -851,11 +968,13 @@ export const addLockEditor = mutation({
 export const removeLockEditor = mutation({
   args: {
     scheduleId: v.id("schedules"),
+    anonymousId: v.optional(v.string()),
     profileId: v.id("userProfiles"),
   },
   handler: async (ctx, args) => {
     const schedule = await ctx.db.get(args.scheduleId);
     if (!schedule) return;
+    await requireScheduleCreator(ctx, schedule, args.anonymousId);
 
     const editors = schedule.lockEditors || [];
     await ctx.db.patch(args.scheduleId, {

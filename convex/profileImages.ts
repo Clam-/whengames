@@ -5,6 +5,9 @@ import {
   internalQuery,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { Id } from "./_generated/dataModel";
+
+const PROFILE_IMAGE_BACKFILL_BATCH_SIZE = 25;
 
 // Internal mutation to update profile with the stored image's storage ID
 export const updateProfileImage = internalMutation({
@@ -80,9 +83,14 @@ export const downloadAndStoreProfileImage = internalAction({
 export const getProfilesNeedingImageBackfill = internalQuery({
   args: {},
   handler: async (ctx) => {
-    const profiles = await ctx.db.query("userProfiles").collect();
+    const profiles = await ctx.db
+      .query("userProfiles")
+      .withIndex("by_profileImageStorageId_and_profileImageUrl", (q) =>
+        q.eq("profileImageStorageId", undefined).gt("profileImageUrl", "")
+      )
+      .take(PROFILE_IMAGE_BACKFILL_BATCH_SIZE);
+
     return profiles
-      .filter((p) => p.profileImageUrl && !p.profileImageStorageId)
       .map((p) => ({ profileId: p._id, imageUrl: p.profileImageUrl! }));
   },
 });
@@ -99,7 +107,7 @@ export const getProfilesNeedingImageBackfill = internalQuery({
 export const backfillAllProfileImages = internalAction({
   args: {},
   handler: async (ctx) => {
-    const profiles: { profileId: any; imageUrl: string }[] =
+    const profiles: { profileId: Id<"userProfiles">; imageUrl: string }[] =
       await ctx.runQuery(
         internal.profileImages.getProfilesNeedingImageBackfill,
         {}
@@ -140,5 +148,13 @@ export const backfillAllProfileImages = internalAction({
     console.log(
       `Backfill complete: ${success} succeeded, ${failed} failed out of ${profiles.length} total`
     );
+
+    if (profiles.length === PROFILE_IMAGE_BACKFILL_BATCH_SIZE) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.profileImages.backfillAllProfileImages,
+        {}
+      );
+    }
   },
 });

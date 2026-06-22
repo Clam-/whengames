@@ -262,7 +262,8 @@ ship today:
    invoker can choose from. Linking your Discord account to a When?
    profile (see "User identity linking" below) makes that menu show the
    schedules you created or participate in; otherwise it falls back to
-   the most recently created public schedules.
+   the most recently created listed schedules. Unlisted schedules are hidden
+   from this fallback but remain accessible to anyone with their direct link.
 2. **Message components** — selecting a schedule from `/when` posts a
    rich embed (locked-in times + top nominations + "Open in When?"
    button) into the current channel. The same embed is used for linked
@@ -315,7 +316,7 @@ ship today:
 linked their Discord account to their When? profile. The table and internal
 mutation are in place, but a public UI still needs a Discord OAuth user-link
 flow before it can safely write those links. Until then, `/when` falls back
-to public schedules.
+to listed schedules.
 
 ### Discord Activities (embedded app)
 

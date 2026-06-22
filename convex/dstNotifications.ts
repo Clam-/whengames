@@ -1,4 +1,9 @@
+import { v } from "convex/values";
 import { internalMutation } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { Id } from "./_generated/dataModel";
+
+const DST_SCHEDULE_BATCH_SIZE = 25;
 
 /**
  * DST Notification System - Placeholder Implementation
@@ -139,13 +144,21 @@ function calculateImpactedUsers(
 
 // Main cron handler: check all recurring schedules for DST impacts
 export const checkUpcomingDstChanges = internalMutation({
-  args: {},
-  handler: async (ctx) => {
+  args: { afterCreatedAt: v.optional(v.number()) },
+  handler: async (ctx, args) => {
     const now = new Date();
 
-    // Get all recurring schedules
-    const schedules = await ctx.db.query("schedules").collect();
-    const recurringSchedules = schedules.filter((s) => s.type === "recurring");
+    const scheduleQuery = ctx.db
+      .query("schedules")
+      .withIndex("by_type_and_createdAt", (q) => {
+        const typed = q.eq("type", "recurring");
+        return args.afterCreatedAt === undefined
+          ? typed
+          : typed.gt("createdAt", args.afterCreatedAt);
+      })
+      .order("asc");
+
+    const recurringSchedules = await scheduleQuery.take(DST_SCHEDULE_BATCH_SIZE);
 
     for (const schedule of recurringSchedules) {
       // Get all selections for this schedule to find participants
@@ -189,7 +202,7 @@ export const checkUpcomingDstChanges = internalMutation({
           .withIndex("by_schedule_profile_date", (q) =>
             q
               .eq("scheduleId", schedule._id)
-              .eq("profileId", impact.profileId as any)
+              .eq("profileId", impact.profileId as Id<"userProfiles">)
               .eq("dstChangeDate", dstDateStr)
           )
           .first();
@@ -198,7 +211,7 @@ export const checkUpcomingDstChanges = internalMutation({
           // Log the notification
           await ctx.db.insert("dstCheckLog", {
             scheduleId: schedule._id,
-            profileId: impact.profileId as any,
+            profileId: impact.profileId as Id<"userProfiles">,
             dstChangeDate: dstDateStr,
             notifiedAt: Date.now(),
             impactDescription: impact.impact,
@@ -229,6 +242,15 @@ export const checkUpcomingDstChanges = internalMutation({
           );
         }
       }
+    }
+
+    if (recurringSchedules.length === DST_SCHEDULE_BATCH_SIZE) {
+      const lastSchedule = recurringSchedules[recurringSchedules.length - 1];
+      await ctx.scheduler.runAfter(
+        0,
+        internal.dstNotifications.checkUpcomingDstChanges,
+        { afterCreatedAt: lastSchedule.createdAt }
+      );
     }
   },
 });

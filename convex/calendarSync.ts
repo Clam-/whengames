@@ -10,6 +10,9 @@ import { Doc, Id } from "./_generated/dataModel";
 
 const SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000;
 const SLOT_MS = 30 * 60 * 1000;
+const MAX_CALENDAR_SYNC_SCHEDULES = 50;
+const MAX_PROFILE_SELECTIONS_FOR_SYNC = 500;
+const MAX_PROFILE_CREATED_SCHEDULES_FOR_SYNC = 50;
 
 type NormalizedEvent = {
   externalEventId: string;
@@ -572,11 +575,12 @@ export const getProfile = internalQuery({
 export const getEnabledSourcesForProfile = internalQuery({
   args: { profileId: v.id("userProfiles") },
   handler: async (ctx, args) => {
-    const sources = await ctx.db
+    return await ctx.db
       .query("calendarSources")
-      .withIndex("by_profileId", (q) => q.eq("profileId", args.profileId))
+      .withIndex("by_profileId_and_enabled", (q) =>
+        q.eq("profileId", args.profileId).eq("enabled", true)
+      )
       .collect();
-    return sources.filter((s) => s.enabled);
   },
 });
 
@@ -683,36 +687,30 @@ export const processCalendarEvents = internalMutation({
     const createdSchedules = await ctx.db
       .query("schedules")
       .withIndex("by_creatorProfileId", (q) => q.eq("creatorProfileId", profileId))
-      .collect();
+      .take(MAX_PROFILE_CREATED_SCHEDULES_FOR_SYNC);
 
-    // Find all schedules by scanning (small-scale app)
-    const allSchedules = await ctx.db
-      .query("schedules")
-      .withIndex("by_createdAt")
-      .take(100);
+    const profileSelections = await ctx.db
+      .query("selections")
+      .withIndex("by_profileId", (q) => q.eq("profileId", profileId))
+      .take(MAX_PROFILE_SELECTIONS_FOR_SYNC);
 
     const createdIds = new Set(createdSchedules.map((s) => s._id.toString()));
     const participatingSchedules: Doc<"schedules">[] = [...createdSchedules];
+    const participatingIds = new Set(createdIds);
 
-    for (const schedule of allSchedules) {
-      if (createdIds.has(schedule._id.toString())) continue;
-
-      const hasSelection = await ctx.db
-        .query("selections")
-        .withIndex("by_schedule_profile", (q) =>
-          q.eq("scheduleId", schedule._id).eq("profileId", profileId),
-        )
-        .first();
-
-      if (hasSelection) {
-        participatingSchedules.push(schedule);
-      }
+    for (const selection of profileSelections) {
+      if (participatingIds.has(selection.scheduleId.toString())) continue;
+      const schedule = await ctx.db.get(selection.scheduleId);
+      if (!schedule) continue;
+      participatingSchedules.push(schedule);
+      participatingIds.add(selection.scheduleId.toString());
+      if (participatingSchedules.length >= MAX_CALENDAR_SYNC_SCHEDULES) break;
     }
 
     const currentEventIds = new Set(events.map((e) => e.externalEventId));
 
-    // Cap at 50 schedules, 200 events to stay within transaction limits
-    const limitedSchedules = participatingSchedules.slice(0, 50);
+    // Cap schedules and events to stay within transaction limits.
+    const limitedSchedules = participatingSchedules.slice(0, MAX_CALENDAR_SYNC_SCHEDULES);
     const limitedEvents = events.slice(0, 200);
 
     for (const schedule of limitedSchedules) {
@@ -729,10 +727,12 @@ export const processCalendarEvents = internalMutation({
 
       const existingCalendarSelections = await ctx.db
         .query("selections")
-        .withIndex("by_schedule_profile", (q) =>
-          q.eq("scheduleId", schedule._id).eq("profileId", profileId),
+        .withIndex("by_schedule_profile_source", (q) =>
+          q
+            .eq("scheduleId", schedule._id)
+            .eq("profileId", profileId)
+            .eq("source", "calendar"),
         )
-        .filter((q) => q.eq(q.field("source"), "calendar"))
         .collect();
 
       // Delete stale calendar selections (event no longer in feed)
@@ -817,34 +817,22 @@ export const processCalendarEvents = internalMutation({
 export const cleanupSelectionsForProfile = internalMutation({
   args: { profileId: v.id("userProfiles") },
   handler: async (ctx, args) => {
-    const schedules = await ctx.db
-      .query("schedules")
-      .withIndex("by_createdAt")
-      .take(200);
-
-    let totalDeleted = 0;
     const BATCH_LIMIT = 500;
+    const selections = await ctx.db
+      .query("selections")
+      .withIndex("by_profileId_source", (q) =>
+        q.eq("profileId", args.profileId).eq("source", "calendar")
+      )
+      .take(BATCH_LIMIT);
 
-    for (const schedule of schedules) {
-      if (totalDeleted >= BATCH_LIMIT) {
-        await ctx.scheduler.runAfter(0, internal.calendarSync.cleanupSelectionsForProfile, {
-          profileId: args.profileId,
-        });
-        return;
-      }
+    for (const sel of selections) {
+      await ctx.db.delete(sel._id);
+    }
 
-      const selections = await ctx.db
-        .query("selections")
-        .withIndex("by_schedule_profile", (q) =>
-          q.eq("scheduleId", schedule._id).eq("profileId", args.profileId),
-        )
-        .filter((q) => q.eq(q.field("source"), "calendar"))
-        .take(BATCH_LIMIT - totalDeleted);
-
-      for (const sel of selections) {
-        await ctx.db.delete(sel._id);
-        totalDeleted++;
-      }
+    if (selections.length === BATCH_LIMIT) {
+      await ctx.scheduler.runAfter(0, internal.calendarSync.cleanupSelectionsForProfile, {
+        profileId: args.profileId,
+      });
     }
   },
 });

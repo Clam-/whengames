@@ -43,6 +43,7 @@ function currentUserProfile(args: Args) {
 function schedulesList() {
   const schedules = store
     .query("schedules")
+    // Match Convex: unlisted schedules are hidden from list views, not link-gated.
     .filter((s) => !s.isPrivate)
     .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 
@@ -188,6 +189,10 @@ function getBlockedProfiles(args: Args) {
 // ---------------------------------------------------------------------------
 
 function listForProfile(args: Args) {
+  if (!args.profileId) {
+    return store.query("savedAvailabilities");
+  }
+
   return store
     .query("savedAvailabilities")
     .filter((s) => s.profileId === args.profileId);

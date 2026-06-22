@@ -126,6 +126,7 @@ export function Header() {
       {showSettings && profile && (
         <UserSettingsModal
           profile={profile}
+          anonymousId={anonymousId || undefined}
           onClose={() => setShowSettings(false)}
         />
       )}

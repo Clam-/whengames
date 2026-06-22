@@ -240,7 +240,7 @@ export const buildSummaryInput = internalQuery({
 
 /**
  * For the /when slash command — fetch a discord-linked user's schedules
- * (created or participated in). Falls back to public schedules if the
+ * (created or participated in). Falls back to listed schedules if the
  * discord user hasn't linked their account yet.
  */
 export const listSchedulesForDiscordUser = internalQuery({
@@ -287,7 +287,7 @@ export const listSchedulesForDiscordUser = internalQuery({
       }
       schedules = [...created, ...participated];
     } else {
-      // Fallback: most-recent public schedules
+      // Fallback: most-recent listed schedules
       const recent = await ctx.db
         .query("schedules")
         .withIndex("by_createdAt")

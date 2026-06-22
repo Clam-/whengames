@@ -1,7 +1,103 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { MutationCtx, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
+
+const PROFILE_MERGE_BATCH_SIZE = 100;
+
+async function getAuthenticatedProfile(ctx: MutationCtx) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) return null;
+
+  return await ctx.db
+    .query("userProfiles")
+    .withIndex("by_authUserId", (q) =>
+      q.eq("authUserId", identity.tokenIdentifier)
+    )
+    .unique();
+}
+
+async function getProfileForSettings(
+  ctx: MutationCtx,
+  anonymousId: string | undefined
+) {
+  const authProfile = await getAuthenticatedProfile(ctx);
+  if (authProfile) return authProfile;
+
+  if (!anonymousId) throw new Error("Not authenticated");
+
+  const anonymousProfile = await ctx.db
+    .query("userProfiles")
+    .withIndex("by_anonymousId", (q) => q.eq("anonymousId", anonymousId))
+    .unique();
+
+  if (!anonymousProfile || anonymousProfile.authUserId) {
+    throw new Error("Profile not found");
+  }
+
+  return anonymousProfile;
+}
+
+async function moveProfileData(
+  ctx: MutationCtx,
+  fromProfileId: Id<"userProfiles">,
+  toProfileId: Id<"userProfiles">
+) {
+  while (true) {
+    const selections = await ctx.db
+      .query("selections")
+      .withIndex("by_profileId", (q) => q.eq("profileId", fromProfileId))
+      .take(PROFILE_MERGE_BATCH_SIZE);
+
+    if (selections.length === 0) break;
+
+    for (const sel of selections) {
+      const existingSel = await ctx.db
+        .query("selections")
+        .withIndex("by_profile_schedule_day_time", (q) =>
+          q
+            .eq("profileId", toProfileId)
+            .eq("scheduleId", sel.scheduleId)
+            .eq("dayKey", sel.dayKey)
+            .eq("timeSlot", sel.timeSlot)
+        )
+        .first();
+
+      if (!existingSel) {
+        await ctx.db.insert("selections", {
+          scheduleId: sel.scheduleId,
+          profileId: toProfileId,
+          dayKey: sel.dayKey,
+          timeSlot: sel.timeSlot,
+          timezone: sel.timezone,
+          state: sel.state,
+          isException: sel.isException,
+          exceptionDate: sel.exceptionDate,
+          source: sel.source,
+          externalEventId: sel.externalEventId,
+        });
+      }
+      await ctx.db.delete(sel._id);
+    }
+  }
+
+  while (true) {
+    const schedules = await ctx.db
+      .query("schedules")
+      .withIndex("by_creatorProfileId", (q) =>
+        q.eq("creatorProfileId", fromProfileId)
+      )
+      .take(PROFILE_MERGE_BATCH_SIZE);
+
+    if (schedules.length === 0) break;
+
+    for (const sched of schedules) {
+      await ctx.db.patch(sched._id, {
+        creatorProfileId: toProfileId,
+      });
+    }
+  }
+}
 
 // Get or create an anonymous user profile
 export const getOrCreateAnonymousProfile = mutation({
@@ -151,25 +247,23 @@ export const currentUserProfile = query({
 // Update user profile
 export const updateProfile = mutation({
   args: {
-    profileId: v.id("userProfiles"),
+    anonymousId: v.optional(v.string()),
     displayName: v.optional(v.string()),
     timezone: v.optional(v.string()),
     weekStartDay: v.optional(v.number()),
     dstNotifications: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const { profileId, ...updates } = args;
+    const profile = await getProfileForSettings(ctx, args.anonymousId);
     const cleanUpdates: Record<string, unknown> = {};
-    if (updates.displayName !== undefined)
-      cleanUpdates.displayName = updates.displayName;
-    if (updates.timezone !== undefined)
-      cleanUpdates.timezone = updates.timezone;
-    if (updates.weekStartDay !== undefined)
-      cleanUpdates.weekStartDay = updates.weekStartDay;
-    if (updates.dstNotifications !== undefined)
-      cleanUpdates.dstNotifications = updates.dstNotifications;
+    if (args.displayName !== undefined) cleanUpdates.displayName = args.displayName;
+    if (args.timezone !== undefined) cleanUpdates.timezone = args.timezone;
+    if (args.weekStartDay !== undefined)
+      cleanUpdates.weekStartDay = args.weekStartDay;
+    if (args.dstNotifications !== undefined)
+      cleanUpdates.dstNotifications = args.dstNotifications;
 
-    await ctx.db.patch(profileId, cleanUpdates);
+    await ctx.db.patch(profile._id, cleanUpdates);
   },
 });
 
@@ -203,43 +297,7 @@ export const mergeAnonymousToAuth = mutation({
 
     if (existingAuthProfile && anonProfile) {
       // Both exist - merge anon selections into auth profile
-      const allSelections = await ctx.db.query("selections").collect();
-      const anonSelectionsFiltered = allSelections.filter(
-        (s) => s.profileId === anonProfile._id
-      );
-
-      for (const sel of anonSelectionsFiltered) {
-        const existingSel = allSelections.find(
-          (s) =>
-            s.profileId === existingAuthProfile._id &&
-            s.scheduleId === sel.scheduleId &&
-            s.dayKey === sel.dayKey &&
-            s.timeSlot === sel.timeSlot
-        );
-        if (!existingSel) {
-          await ctx.db.insert("selections", {
-            scheduleId: sel.scheduleId,
-            profileId: existingAuthProfile._id,
-            dayKey: sel.dayKey,
-            timeSlot: sel.timeSlot,
-            timezone: sel.timezone,
-            state: sel.state,
-            isException: sel.isException,
-            exceptionDate: sel.exceptionDate,
-          });
-        }
-        await ctx.db.delete(sel._id);
-      }
-
-      // Update schedules created by anon to point to auth profile
-      const allSchedules = await ctx.db.query("schedules").collect();
-      for (const sched of allSchedules) {
-        if (sched.creatorProfileId === anonProfile._id) {
-          await ctx.db.patch(sched._id, {
-            creatorProfileId: existingAuthProfile._id,
-          });
-        }
-      }
+      await moveProfileData(ctx, anonProfile._id, existingAuthProfile._id);
 
       // Inherit anon display name if auth profile has no custom one
       if (anonProfile.displayName && !existingAuthProfile.displayName) {
@@ -344,43 +402,7 @@ export const ensureAuthProfile = mutation({
 
     if (authProfile && anonProfile && authProfile._id !== anonProfile._id) {
       // Merge: move all anon data to auth profile
-      const allSelections = await ctx.db.query("selections").collect();
-      const anonSelections = allSelections.filter(
-        (s) => s.profileId === anonProfile!._id
-      );
-
-      for (const sel of anonSelections) {
-        const exists = allSelections.some(
-          (s) =>
-            s.profileId === authProfile!._id &&
-            s.scheduleId === sel.scheduleId &&
-            s.dayKey === sel.dayKey &&
-            s.timeSlot === sel.timeSlot
-        );
-        if (!exists) {
-          await ctx.db.insert("selections", {
-            scheduleId: sel.scheduleId,
-            profileId: authProfile!._id,
-            dayKey: sel.dayKey,
-            timeSlot: sel.timeSlot,
-            timezone: sel.timezone,
-            state: sel.state,
-            isException: sel.isException,
-            exceptionDate: sel.exceptionDate,
-          });
-        }
-        await ctx.db.delete(sel._id);
-      }
-
-      // Reassign schedules
-      const allSchedules = await ctx.db.query("schedules").collect();
-      for (const sched of allSchedules) {
-        if (sched.creatorProfileId === anonProfile._id) {
-          await ctx.db.patch(sched._id, {
-            creatorProfileId: authProfile._id,
-          });
-        }
-      }
+      await moveProfileData(ctx, anonProfile._id, authProfile._id);
 
       // Inherit display name from anon if it was set
       if (anonProfile.displayName) {
@@ -468,17 +490,23 @@ export const ensureAuthProfile = mutation({
 // Unlink SSO and convert back to anonymous/cookie-based account
 export const unlinkSso = mutation({
   args: {
-    profileId: v.id("userProfiles"),
     newAnonymousId: v.string(),
   },
   handler: async (ctx, args) => {
-    const profile = await ctx.db.get(args.profileId);
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+
+    const profile = await ctx.db
+      .query("userProfiles")
+      .withIndex("by_authUserId", (q) =>
+        q.eq("authUserId", identity.tokenIdentifier)
+      )
+      .unique();
+
     if (!profile) throw new Error("Profile not found");
     if (!profile.authUserId) throw new Error("Profile is not linked to SSO");
 
-    // Get the current user's identity for the SSO name fallback
-    const identity = await ctx.auth.getUserIdentity();
-    const ssoName = identity?.name;
+    const ssoName = identity.name;
 
     // Clean up stored profile image from Convex storage
     if (profile.profileImageStorageId) {
@@ -498,7 +526,7 @@ export const unlinkSso = mutation({
       updates.displayName = ssoName || "Anonymous";
     }
 
-    await ctx.db.patch(args.profileId, updates);
+    await ctx.db.patch(profile._id, updates);
 
     return { displayName: (updates.displayName as string) || profile.displayName };
   },

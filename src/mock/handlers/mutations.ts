@@ -32,13 +32,20 @@ function getOrCreateAnonymousProfile(args: Args) {
 }
 
 function updateProfile(args: Args) {
-  const { profileId, ...updates } = args;
+  const profile =
+    (args.anonymousId
+      ? store
+          .query("userProfiles")
+          .find((p) => p.anonymousId === args.anonymousId)
+      : undefined) ?? store.query("userProfiles")[0];
+  if (!profile) return;
+
   const clean: Record<string, unknown> = {};
-  if (updates.displayName !== undefined) clean.displayName = updates.displayName;
-  if (updates.timezone !== undefined) clean.timezone = updates.timezone;
-  if (updates.weekStartDay !== undefined) clean.weekStartDay = updates.weekStartDay;
-  if (updates.dstNotifications !== undefined) clean.dstNotifications = updates.dstNotifications;
-  store.patch("userProfiles", profileId, clean);
+  if (args.displayName !== undefined) clean.displayName = args.displayName;
+  if (args.timezone !== undefined) clean.timezone = args.timezone;
+  if (args.weekStartDay !== undefined) clean.weekStartDay = args.weekStartDay;
+  if (args.dstNotifications !== undefined) clean.dstNotifications = args.dstNotifications;
+  store.patch("userProfiles", profile._id, clean);
 }
 
 function ensureAuthProfile() {

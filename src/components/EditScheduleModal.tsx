@@ -17,10 +17,11 @@ interface Schedule {
 
 interface Props {
   schedule: Schedule;
+  anonymousId?: string;
   onClose: () => void;
 }
 
-export function EditScheduleModal({ schedule, onClose }: Props) {
+export function EditScheduleModal({ schedule, anonymousId, onClose }: Props) {
   const navigate = useNavigate();
   const updateSchedule = useMutation(api.schedules.update);
   const removeSchedule = useMutation(api.schedules.remove);
@@ -29,6 +30,7 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
   // Load blocked profiles
   const blockedProfiles = useQuery(api.schedules.getBlockedProfiles, {
     scheduleId: schedule._id,
+    anonymousId,
   });
 
   const [title, setTitle] = useState(schedule.title);
@@ -55,6 +57,7 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
     try {
       await updateSchedule({
         scheduleId: schedule._id,
+        anonymousId,
         title: title.trim(),
         description: description.trim() || undefined,
         type,
@@ -77,7 +80,7 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
   const handleDelete = async () => {
     setIsSubmitting(true);
     try {
-      await removeSchedule({ scheduleId: schedule._id });
+      await removeSchedule({ scheduleId: schedule._id, anonymousId });
       navigate("/");
     } catch (err) {
       console.error("Failed to delete schedule:", err);
@@ -260,13 +263,13 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
                 htmlFor="edit-is-private"
                 className="text-sm text-gray-700 dark:text-slate-300"
               >
-                Private schedule
+                Unlisted schedule
               </label>
             </div>
             {isPrivate && (
               <p className="text-xs text-gray-500 mt-1 ml-6 dark:text-slate-400">
-                Private schedules can still be viewed by anyone with the link to
-                this schedule.
+                Unlisted schedules are hidden from the public list but can still
+                be viewed by anyone with the link.
               </p>
             )}
           </div>
@@ -309,6 +312,7 @@ export function EditScheduleModal({ schedule, onClose }: Props) {
                       onClick={async () => {
                         await unblockParticipant({
                           scheduleId: schedule._id,
+                          anonymousId,
                           profileId: blocked.profileId,
                         });
                       }}

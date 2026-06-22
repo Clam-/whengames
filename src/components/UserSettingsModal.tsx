@@ -25,6 +25,7 @@ interface Profile {
 
 interface Props {
   profile: Profile;
+  anonymousId?: string;
   onClose: () => void;
 }
 
@@ -128,7 +129,7 @@ function TimezoneSearchSelect({
   );
 }
 
-export function UserSettingsModal({ profile, onClose }: Props) {
+export function UserSettingsModal({ profile, anonymousId, onClose }: Props) {
   const updateProfile = useMutation(api.users.updateProfile);
   const unlinkSso = useMutation(api.users.unlinkSso);
   const triggerSync = useAction(api.calendarSync.triggerSyncForProfile);
@@ -159,7 +160,6 @@ export function UserSettingsModal({ profile, onClose }: Props) {
       const newAnonymousId = crypto.randomUUID();
 
       const result = await unlinkSso({
-        profileId: profile._id,
         newAnonymousId,
       });
 
@@ -183,7 +183,7 @@ export function UserSettingsModal({ profile, onClose }: Props) {
     setSaving(true);
     try {
       await updateProfile({
-        profileId: profile._id,
+        anonymousId: profile.authType === "anonymous" ? anonymousId : undefined,
         displayName,
         timezone,
         weekStartDay,

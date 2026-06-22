@@ -33,6 +33,7 @@ export function ScheduleView() {
   const profile = useQuery(api.users.currentUserProfile, {
     anonymousId: isAuthenticated ? undefined : anonymousId || undefined,
   });
+  const callerAnonymousId = isAuthenticated ? undefined : anonymousId || undefined;
 
   const schedule = useQuery(api.schedules.get, {
     scheduleId: id as Id<"schedules">,
@@ -72,7 +73,7 @@ export function ScheduleView() {
   const isSsoUser = profile?.authType === "sso";
   const savedAvailabilities = useQuery(
     api.savedAvailabilities.listForProfile,
-    isSsoUser && profile?._id ? { profileId: profile._id } : "skip"
+    isSsoUser && profile?._id ? {} : "skip"
   );
 
   // Availability link mutations
@@ -163,9 +164,6 @@ export function ScheduleView() {
     ) => {
       if (!effectiveProfileId) return;
 
-      // When creator edits another user, pass callerProfileId for auth bypass
-      const callerProfileId = editingProfileId && profile ? profile._id : undefined;
-
       if (state === "blank") {
         await removeSelectionMut({
           scheduleId: id as Id<"schedules">,
@@ -174,7 +172,7 @@ export function ScheduleView() {
           timeSlot,
           isException,
           exceptionDate,
-          callerProfileId,
+          anonymousId: callerAnonymousId,
         });
       } else {
         await setSelectionMut({
@@ -186,11 +184,11 @@ export function ScheduleView() {
           state,
           isException,
           exceptionDate,
-          callerProfileId,
+          anonymousId: callerAnonymousId,
         });
       }
     },
-    [id, effectiveProfileId, editingProfileId, profile, timezone, setSelectionMut, removeSelectionMut]
+    [id, effectiveProfileId, callerAnonymousId, timezone, setSelectionMut, removeSelectionMut]
   );
 
   const handleBatchChange = useCallback(
@@ -205,18 +203,15 @@ export function ScheduleView() {
     ) => {
       if (!effectiveProfileId) return;
 
-      // When creator edits another user, pass callerProfileId for auth bypass
-      const callerProfileId = editingProfileId && profile ? profile._id : undefined;
-
       await batchSetMut({
         scheduleId: id as Id<"schedules">,
         profileId: effectiveProfileId,
         timezone,
         selections: cells,
-        callerProfileId,
+        anonymousId: callerAnonymousId,
       });
     },
-    [id, effectiveProfileId, editingProfileId, profile, timezone, batchSetMut]
+    [id, effectiveProfileId, callerAnonymousId, timezone, batchSetMut]
   );
 
   const handleCreatorSlotChange = useCallback(
@@ -226,17 +221,18 @@ export function ScheduleView() {
       if (isCreator && creatorMode === "limit") {
         await setDisallowedSlots({
           scheduleId: schedule._id,
+          anonymousId: callerAnonymousId,
           slots,
         });
       } else if (canLock && creatorMode === "lock") {
         await setLockedSlots({
           scheduleId: schedule._id,
-          callerProfileId: profile!._id,
+          anonymousId: callerAnonymousId,
           slots,
         });
       }
     },
-    [isCreator, canLock, schedule, profile, creatorMode, setDisallowedSlots, setLockedSlots]
+    [isCreator, canLock, schedule, callerAnonymousId, creatorMode, setDisallowedSlots, setLockedSlots]
   );
 
   // Availability handlers
@@ -251,7 +247,6 @@ export function ScheduleView() {
       await applyToScheduleMut({
         savedAvailabilityId,
         scheduleId: schedule._id,
-        profileId: profile._id,
       });
     },
     [profile, schedule, applyToScheduleMut]
@@ -263,7 +258,6 @@ export function ScheduleView() {
       await applyToScheduleMut({
         savedAvailabilityId,
         scheduleId: schedule._id,
-        profileId: profile._id,
       });
     },
     [profile, schedule, applyToScheduleMut]
@@ -273,7 +267,6 @@ export function ScheduleView() {
     if (!profile || !schedule) return;
     await saveOverwriteDefaultMut({
       scheduleId: schedule._id,
-      profileId: profile._id,
       timezone,
     });
   }, [profile, schedule, timezone, saveOverwriteDefaultMut]);
@@ -283,7 +276,6 @@ export function ScheduleView() {
       if (!profile || !schedule) return;
       await saveNewAndLinkMut({
         scheduleId: schedule._id,
-        profileId: profile._id,
         name,
         timezone,
       });
@@ -295,7 +287,6 @@ export function ScheduleView() {
     if (!profile || !schedule) return;
     await unlinkFromScheduleMut({
       scheduleId: schedule._id,
-      profileId: profile._id,
     });
   }, [profile, schedule, unlinkFromScheduleMut]);
 
@@ -305,10 +296,11 @@ export function ScheduleView() {
       if (!schedule) return;
       await setAcceptParticipation({
         scheduleId: schedule._id,
+        anonymousId: callerAnonymousId,
         acceptParticipation: accept,
       });
     },
-    [schedule, setAcceptParticipation]
+    [schedule, callerAnonymousId, setAcceptParticipation]
   );
 
   const handleToggleAnyoneCanLock = useCallback(
@@ -316,10 +308,11 @@ export function ScheduleView() {
       if (!schedule) return;
       await setAnyoneCanLock({
         scheduleId: schedule._id,
+        anonymousId: callerAnonymousId,
         anyoneCanLock: enabled,
       });
     },
-    [schedule, setAnyoneCanLock]
+    [schedule, callerAnonymousId, setAnyoneCanLock]
   );
 
   const handlePromoteLockEditor = useCallback(
@@ -327,10 +320,11 @@ export function ScheduleView() {
       if (!schedule) return;
       await addLockEditor({
         scheduleId: schedule._id,
+        anonymousId: callerAnonymousId,
         profileId,
       });
     },
-    [schedule, addLockEditor]
+    [schedule, callerAnonymousId, addLockEditor]
   );
 
   const handleDemoteLockEditor = useCallback(
@@ -338,10 +332,11 @@ export function ScheduleView() {
       if (!schedule) return;
       await removeLockEditor({
         scheduleId: schedule._id,
+        anonymousId: callerAnonymousId,
         profileId,
       });
     },
-    [schedule, removeLockEditor]
+    [schedule, callerAnonymousId, removeLockEditor]
   );
 
   const handleDeleteParticipant = useCallback(
@@ -353,10 +348,11 @@ export function ScheduleView() {
       }
       await removeParticipant({
         scheduleId: schedule._id,
+        anonymousId: callerAnonymousId,
         profileId,
       });
     },
-    [schedule, editingProfileId, removeParticipant]
+    [schedule, callerAnonymousId, editingProfileId, removeParticipant]
   );
 
   const handleBlockParticipant = useCallback(
@@ -368,10 +364,11 @@ export function ScheduleView() {
       }
       await blockParticipant({
         scheduleId: schedule._id,
+        anonymousId: callerAnonymousId,
         profileId,
       });
     },
-    [schedule, editingProfileId, blockParticipant]
+    [schedule, callerAnonymousId, editingProfileId, blockParticipant]
   );
 
   const handleEditParticipant = useCallback(
@@ -428,21 +425,29 @@ export function ScheduleView() {
     if (!profile || !schedule) return;
 
     if (canLock && creatorMode === "lock") {
-      await clearLockedSlots({ scheduleId: schedule._id, callerProfileId: profile._id });
+      await clearLockedSlots({
+        scheduleId: schedule._id,
+        anonymousId: callerAnonymousId,
+      });
     } else if (!isCreator) {
       await clearSelections({
         scheduleId: schedule._id,
         profileId: profile._id,
+        anonymousId: callerAnonymousId,
       });
     } else {
       switch (creatorMode) {
         case "limit":
-          await clearDisallowedSlots({ scheduleId: schedule._id });
+          await clearDisallowedSlots({
+            scheduleId: schedule._id,
+            anonymousId: callerAnonymousId,
+          });
           break;
         case "nominate":
           await clearSelections({
             scheduleId: schedule._id,
             profileId: profile._id,
+            anonymousId: callerAnonymousId,
           });
           break;
       }
@@ -456,6 +461,7 @@ export function ScheduleView() {
     clearSelections,
     clearDisallowedSlots,
     clearLockedSlots,
+    callerAnonymousId,
   ]);
 
   const handleDisallowOutsideNominations = useCallback(async () => {
@@ -498,9 +504,10 @@ export function ScheduleView() {
 
     await setDisallowedSlots({
       scheduleId: schedule._id,
+      anonymousId: callerAnonymousId,
       slots: disallowedSlots,
     });
-  }, [schedule, profile, setDisallowedSlots]);
+  }, [schedule, profile, callerAnonymousId, setDisallowedSlots]);
 
   if (!schedule) {
     return (
@@ -998,6 +1005,7 @@ export function ScheduleView() {
       {showEditModal && schedule && (
         <EditScheduleModal
           schedule={schedule}
+          anonymousId={callerAnonymousId}
           onClose={() => setShowEditModal(false)}
         />
       )}

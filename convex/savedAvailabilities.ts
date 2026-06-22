@@ -1,36 +1,83 @@
 import { v } from "convex/values";
-import { mutation, query, MutationCtx } from "./_generated/server";
-import { Id } from "./_generated/dataModel";
+import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
+import { Doc, Id } from "./_generated/dataModel";
 
-// List saved availabilities for a profile
+type SavedAvailabilitySlot = {
+  dayKey: string;
+  timeSlot: string;
+  state: "can-do" | "cant-do" | "maybe";
+};
+
+async function requireAuthenticatedProfile(
+  ctx: QueryCtx | MutationCtx
+): Promise<Doc<"userProfiles">> {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) throw new Error("Not authenticated");
+
+  const profile = await ctx.db
+    .query("userProfiles")
+    .withIndex("by_authUserId", (q) =>
+      q.eq("authUserId", identity.tokenIdentifier)
+    )
+    .unique();
+
+  if (!profile) throw new Error("Authenticated profile not found");
+  return profile;
+}
+
+async function requireOwnedSavedAvailability(
+  ctx: QueryCtx | MutationCtx,
+  savedAvailabilityId: Id<"savedAvailabilities">,
+  profileId: Id<"userProfiles">
+): Promise<Doc<"savedAvailabilities">> {
+  const savedAvail = await ctx.db.get(savedAvailabilityId);
+  if (!savedAvail) throw new Error("Saved availability not found");
+  if (savedAvail.profileId !== profileId) throw new Error("Not authorized");
+  return savedAvail;
+}
+
+function sameProfile(
+  left: Id<"userProfiles">,
+  right: Id<"userProfiles">
+): boolean {
+  return left === right;
+}
+
+// List saved availabilities for the authenticated profile
 export const listForProfile = query({
-  args: { profileId: v.id("userProfiles") },
-  handler: async (ctx, args) => {
+  args: {},
+  handler: async (ctx) => {
+    const profile = await requireAuthenticatedProfile(ctx);
+
     return await ctx.db
       .query("savedAvailabilities")
-      .withIndex("by_profileId", (q) => q.eq("profileId", args.profileId))
+      .withIndex("by_profileId", (q) => q.eq("profileId", profile._id))
       .collect();
   },
 });
 
-// Get availability link for a schedule/profile pair
+// Get availability link for a schedule and the authenticated profile
 export const getLinkForSchedule = query({
   args: {
     scheduleId: v.id("schedules"),
-    profileId: v.id("userProfiles"),
   },
   handler: async (ctx, args) => {
+    const profile = await requireAuthenticatedProfile(ctx);
+
     const link = await ctx.db
       .query("availabilityLinks")
       .withIndex("by_schedule_profile", (q) =>
-        q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
+        q.eq("scheduleId", args.scheduleId).eq("profileId", profile._id)
       )
       .unique();
 
     if (!link) return null;
 
-    const savedAvail = await ctx.db.get(link.savedAvailabilityId);
-    if (!savedAvail) return null;
+    const savedAvail = await requireOwnedSavedAvailability(
+      ctx,
+      link.savedAvailabilityId,
+      profile._id
+    );
 
     return {
       linkId: link._id,
@@ -45,7 +92,7 @@ async function getEffectiveSlots(
   ctx: { db: MutationCtx["db"] },
   scheduleId: Id<"schedules">,
   profileId: Id<"userProfiles">
-): Promise<{ dayKey: string; timeSlot: string; state: "can-do" | "cant-do" | "maybe" }[]> {
+): Promise<SavedAvailabilitySlot[]> {
   // Check if linked to a saved availability
   const existingLink = await ctx.db
     .query("availabilityLinks")
@@ -56,7 +103,10 @@ async function getEffectiveSlots(
 
   if (existingLink) {
     const linkedAvail = await ctx.db.get(existingLink.savedAvailabilityId);
-    return linkedAvail?.slots || [];
+    if (linkedAvail && sameProfile(linkedAvail.profileId, profileId)) {
+      return linkedAvail.slots;
+    }
+    return [];
   }
 
   // Not linked - get from selections
@@ -80,22 +130,20 @@ async function getEffectiveSlots(
 export const saveNewAndLink = mutation({
   args: {
     scheduleId: v.id("schedules"),
-    profileId: v.id("userProfiles"),
     name: v.string(),
     timezone: v.string(),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Not authenticated");
+    const profile = await requireAuthenticatedProfile(ctx);
 
     // Get effective current slots
-    const slots = await getEffectiveSlots(ctx, args.scheduleId, args.profileId);
+    const slots = await getEffectiveSlots(ctx, args.scheduleId, profile._id);
 
     // Remove existing link if any (without copying back)
     const existingLink = await ctx.db
       .query("availabilityLinks")
       .withIndex("by_schedule_profile", (q) =>
-        q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
+        q.eq("scheduleId", args.scheduleId).eq("profileId", profile._id)
       )
       .unique();
     if (existingLink) {
@@ -106,7 +154,7 @@ export const saveNewAndLink = mutation({
     const selections = await ctx.db
       .query("selections")
       .withIndex("by_schedule_profile", (q) =>
-        q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
+        q.eq("scheduleId", args.scheduleId).eq("profileId", profile._id)
       )
       .collect();
     for (const sel of selections) {
@@ -117,7 +165,7 @@ export const saveNewAndLink = mutation({
 
     // Create saved availability
     const savedAvailId = await ctx.db.insert("savedAvailabilities", {
-      profileId: args.profileId,
+      profileId: profile._id,
       name: args.name,
       timezone: args.timezone,
       slots,
@@ -127,7 +175,7 @@ export const saveNewAndLink = mutation({
     await ctx.db.insert("availabilityLinks", {
       savedAvailabilityId: savedAvailId,
       scheduleId: args.scheduleId,
-      profileId: args.profileId,
+      profileId: profile._id,
     });
 
     return savedAvailId;
@@ -138,21 +186,19 @@ export const saveNewAndLink = mutation({
 export const saveOverwriteDefaultAndLink = mutation({
   args: {
     scheduleId: v.id("schedules"),
-    profileId: v.id("userProfiles"),
     timezone: v.string(),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Not authenticated");
+    const profile = await requireAuthenticatedProfile(ctx);
 
     // Get effective current slots
-    const slots = await getEffectiveSlots(ctx, args.scheduleId, args.profileId);
+    const slots = await getEffectiveSlots(ctx, args.scheduleId, profile._id);
 
     // Remove existing link if any (without copying back)
     const existingLink = await ctx.db
       .query("availabilityLinks")
       .withIndex("by_schedule_profile", (q) =>
-        q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
+        q.eq("scheduleId", args.scheduleId).eq("profileId", profile._id)
       )
       .unique();
     if (existingLink) {
@@ -163,7 +209,7 @@ export const saveOverwriteDefaultAndLink = mutation({
     const selections = await ctx.db
       .query("selections")
       .withIndex("by_schedule_profile", (q) =>
-        q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
+        q.eq("scheduleId", args.scheduleId).eq("profileId", profile._id)
       )
       .collect();
     for (const sel of selections) {
@@ -175,7 +221,7 @@ export const saveOverwriteDefaultAndLink = mutation({
     // Find or create default availability
     const allSaved = await ctx.db
       .query("savedAvailabilities")
-      .withIndex("by_profileId", (q) => q.eq("profileId", args.profileId))
+      .withIndex("by_profileId", (q) => q.eq("profileId", profile._id))
       .collect();
     const existingDefault = allSaved.find((s) => s.isDefault === true);
 
@@ -188,7 +234,7 @@ export const saveOverwriteDefaultAndLink = mutation({
       savedAvailId = existingDefault._id;
     } else {
       savedAvailId = await ctx.db.insert("savedAvailabilities", {
-        profileId: args.profileId,
+        profileId: profile._id,
         name: "Default",
         isDefault: true,
         timezone: args.timezone,
@@ -200,7 +246,7 @@ export const saveOverwriteDefaultAndLink = mutation({
     await ctx.db.insert("availabilityLinks", {
       savedAvailabilityId: savedAvailId,
       scheduleId: args.scheduleId,
-      profileId: args.profileId,
+      profileId: profile._id,
     });
 
     return savedAvailId;
@@ -212,17 +258,20 @@ export const applyToSchedule = mutation({
   args: {
     savedAvailabilityId: v.id("savedAvailabilities"),
     scheduleId: v.id("schedules"),
-    profileId: v.id("userProfiles"),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Not authenticated");
+    const profile = await requireAuthenticatedProfile(ctx);
+    await requireOwnedSavedAvailability(
+      ctx,
+      args.savedAvailabilityId,
+      profile._id
+    );
 
     // Remove existing link if any
     const existingLink = await ctx.db
       .query("availabilityLinks")
       .withIndex("by_schedule_profile", (q) =>
-        q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
+        q.eq("scheduleId", args.scheduleId).eq("profileId", profile._id)
       )
       .unique();
     if (existingLink) {
@@ -233,7 +282,7 @@ export const applyToSchedule = mutation({
     const selections = await ctx.db
       .query("selections")
       .withIndex("by_schedule_profile", (q) =>
-        q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
+        q.eq("scheduleId", args.scheduleId).eq("profileId", profile._id)
       )
       .collect();
     for (const sel of selections) {
@@ -246,7 +295,7 @@ export const applyToSchedule = mutation({
     await ctx.db.insert("availabilityLinks", {
       savedAvailabilityId: args.savedAvailabilityId,
       scheduleId: args.scheduleId,
-      profileId: args.profileId,
+      profileId: profile._id,
     });
   },
 });
@@ -255,35 +304,35 @@ export const applyToSchedule = mutation({
 export const unlinkFromSchedule = mutation({
   args: {
     scheduleId: v.id("schedules"),
-    profileId: v.id("userProfiles"),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Not authenticated");
+    const profile = await requireAuthenticatedProfile(ctx);
 
     const link = await ctx.db
       .query("availabilityLinks")
       .withIndex("by_schedule_profile", (q) =>
-        q.eq("scheduleId", args.scheduleId).eq("profileId", args.profileId)
+        q.eq("scheduleId", args.scheduleId).eq("profileId", profile._id)
       )
       .unique();
 
     if (!link) return;
 
     // Get the saved availability to copy slots back
-    const savedAvail = await ctx.db.get(link.savedAvailabilityId);
+    const savedAvail = await requireOwnedSavedAvailability(
+      ctx,
+      link.savedAvailabilityId,
+      profile._id
+    );
 
-    if (savedAvail) {
-      for (const slot of savedAvail.slots) {
-        await ctx.db.insert("selections", {
-          scheduleId: args.scheduleId,
-          profileId: args.profileId,
-          dayKey: slot.dayKey,
-          timeSlot: slot.timeSlot,
-          timezone: savedAvail.timezone,
-          state: slot.state,
-        });
-      }
+    for (const slot of savedAvail.slots) {
+      await ctx.db.insert("selections", {
+        scheduleId: args.scheduleId,
+        profileId: profile._id,
+        dayKey: slot.dayKey,
+        timeSlot: slot.timeSlot,
+        timezone: savedAvail.timezone,
+        state: slot.state,
+      });
     }
 
     // Delete the link
@@ -297,10 +346,12 @@ export const deleteSaved = mutation({
     savedAvailabilityId: v.id("savedAvailabilities"),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Not authenticated");
-
-    const savedAvail = await ctx.db.get(args.savedAvailabilityId);
+    const profile = await requireAuthenticatedProfile(ctx);
+    const savedAvail = await requireOwnedSavedAvailability(
+      ctx,
+      args.savedAvailabilityId,
+      profile._id
+    );
 
     // Unlink from all schedules, copying slots back
     const links = await ctx.db
@@ -311,11 +362,11 @@ export const deleteSaved = mutation({
       .collect();
 
     for (const link of links) {
-      if (savedAvail) {
+      if (sameProfile(link.profileId, profile._id)) {
         for (const slot of savedAvail.slots) {
           await ctx.db.insert("selections", {
             scheduleId: link.scheduleId,
-            profileId: link.profileId,
+            profileId: profile._id,
             dayKey: slot.dayKey,
             timeSlot: slot.timeSlot,
             timezone: savedAvail.timezone,
@@ -327,9 +378,7 @@ export const deleteSaved = mutation({
     }
 
     // Delete the saved availability
-    if (savedAvail) {
-      await ctx.db.delete(args.savedAvailabilityId);
-    }
+    await ctx.db.delete(args.savedAvailabilityId);
   },
 });
 
@@ -340,8 +389,12 @@ export const renameSaved = mutation({
     name: v.string(),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Not authenticated");
+    const profile = await requireAuthenticatedProfile(ctx);
+    await requireOwnedSavedAvailability(
+      ctx,
+      args.savedAvailabilityId,
+      profile._id
+    );
 
     await ctx.db.patch(args.savedAvailabilityId, { name: args.name });
   },
@@ -351,6 +404,13 @@ export const renameSaved = mutation({
 export const getLinkedScheduleCount = query({
   args: { savedAvailabilityId: v.id("savedAvailabilities") },
   handler: async (ctx, args) => {
+    const profile = await requireAuthenticatedProfile(ctx);
+    await requireOwnedSavedAvailability(
+      ctx,
+      args.savedAvailabilityId,
+      profile._id
+    );
+
     const links = await ctx.db
       .query("availabilityLinks")
       .withIndex("by_savedAvailability", (q) =>

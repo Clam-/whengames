@@ -20,7 +20,11 @@ export default defineSchema({
     dstNotifications: v.boolean(),
   })
     .index("by_authUserId", ["authUserId"])
-    .index("by_anonymousId", ["anonymousId"]),
+    .index("by_anonymousId", ["anonymousId"])
+    .index("by_profileImageStorageId_and_profileImageUrl", [
+      "profileImageStorageId",
+      "profileImageUrl",
+    ]),
 
   schedules: defineTable({
     title: v.string(),
@@ -54,12 +58,15 @@ export default defineSchema({
     isLocked: v.optional(v.boolean()),
     anyoneCanLock: v.optional(v.boolean()),
     lockEditors: v.optional(v.array(v.id("userProfiles"))),
+    // Legacy field name: true means unlisted, not access-controlled.
     isPrivate: v.optional(v.boolean()),
     acceptParticipation: v.optional(v.boolean()), // undefined/true = open, false = closed
     createdAt: v.number(),
   })
     .index("by_creatorProfileId", ["creatorProfileId"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_createdAt", ["createdAt"])
+    .index("by_isPrivate_and_createdAt", ["isPrivate", "createdAt"])
+    .index("by_type_and_createdAt", ["type", "createdAt"]),
 
   // Blocked profiles per schedule (creator can block users from participating)
   blockedProfiles: defineTable({
@@ -93,6 +100,14 @@ export default defineSchema({
     .index("by_schedule", ["scheduleId"])
     .index("by_profileId", ["profileId"])
     .index("by_schedule_profile", ["scheduleId", "profileId"])
+    .index("by_schedule_profile_source", ["scheduleId", "profileId", "source"])
+    .index("by_profileId_source", ["profileId", "source"])
+    .index("by_profile_schedule_day_time", [
+      "profileId",
+      "scheduleId",
+      "dayKey",
+      "timeSlot",
+    ])
     .index("by_schedule_day_time", ["scheduleId", "dayKey", "timeSlot"]),
 
   // Saved weekly availabilities (SSO users only)
@@ -163,6 +178,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_profileId", ["profileId"])
+    .index("by_profileId_and_enabled", ["profileId", "enabled"])
     .index("by_lastSyncAt", ["lastSyncAt"]),
 
   // User overrides for calendar-synced "can't do" cells

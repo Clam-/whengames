@@ -4,13 +4,20 @@ import {
   mutation,
   action,
   internalMutation,
+  internalQuery,
   MutationCtx,
+  QueryCtx,
 } from "./_generated/server";
-import { internal, api } from "./_generated/api";
-import { Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
+import { Doc, Id } from "./_generated/dataModel";
 
 async function getAuthenticatedProfile(
-  ctx: { auth: { getUserIdentity: () => Promise<{ tokenIdentifier: string } | null> }; db: MutationCtx["db"] },
+  ctx: {
+    auth: {
+      getUserIdentity: () => Promise<{ tokenIdentifier: string } | null>;
+    };
+    db: QueryCtx["db"] | MutationCtx["db"];
+  },
   profileId: Id<"userProfiles">
 ) {
   const identity = await ctx.auth.getUserIdentity();
@@ -26,13 +33,53 @@ async function getAuthenticatedProfile(
   return profile;
 }
 
+function redactedCalendarSource(source: Doc<"calendarSources">) {
+  return {
+    _id: source._id,
+    type: source.type,
+    availableCalendars: source.availableCalendars,
+    selectedCalendarIds: source.selectedCalendarIds,
+    hasIcsUrl: source.type === "ics" && !!source.icsUrl,
+    lastSyncAt: source.lastSyncAt,
+    lastSyncStatus: source.lastSyncStatus,
+    lastSyncError:
+      source.lastSyncStatus === "error" ? "Calendar sync failed" : undefined,
+    enabled: source.enabled,
+  };
+}
+
 export const getForProfile = query({
   args: { profileId: v.id("userProfiles") },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const profile = await getAuthenticatedProfile(ctx, args.profileId);
+
+    const sources = await ctx.db
       .query("calendarSources")
-      .withIndex("by_profileId", (q) => q.eq("profileId", args.profileId))
-      .collect();
+      .withIndex("by_profileId", (q) => q.eq("profileId", profile._id))
+      .take(10);
+    return sources.map(redactedCalendarSource);
+  },
+});
+
+export const getOwnedGoogleSource = internalQuery({
+  args: {
+    profileId: v.id("userProfiles"),
+    authUserId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const profile = await ctx.db
+      .query("userProfiles")
+      .withIndex("by_authUserId", (q) => q.eq("authUserId", args.authUserId))
+      .unique();
+    if (!profile || profile._id !== args.profileId) {
+      throw new Error("Not authorized");
+    }
+
+    const sources = await ctx.db
+      .query("calendarSources")
+      .withIndex("by_profileId", (q) => q.eq("profileId", profile._id))
+      .take(10);
+    return sources.find((s) => s.type === "google") ?? null;
   },
 });
 
@@ -56,7 +103,7 @@ export const storeGoogleCalendarToken = internalMutation({
     const existingSources = await ctx.db
       .query("calendarSources")
       .withIndex("by_profileId", (q) => q.eq("profileId", profile._id))
-      .collect();
+      .take(10);
     const googleSource = existingSources.find((s) => s.type === "google");
 
     let calendarSourceId: Id<"calendarSources">;
@@ -99,7 +146,7 @@ export const updateSelectedCalendars = mutation({
     const sources = await ctx.db
       .query("calendarSources")
       .withIndex("by_profileId", (q) => q.eq("profileId", args.profileId))
-      .collect();
+      .take(10);
     const googleSource = sources.find((s) => s.type === "google");
     if (!googleSource) throw new Error("No Google calendar source found");
 
@@ -120,7 +167,7 @@ export const saveIcsUrl = mutation({
     const sources = await ctx.db
       .query("calendarSources")
       .withIndex("by_profileId", (q) => q.eq("profileId", args.profileId))
-      .collect();
+      .take(10);
     const icsSource = sources.find((s) => s.type === "ics");
 
     if (icsSource) {
@@ -174,14 +221,13 @@ export const fetchGoogleCalendars = action({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
 
-    const sources: Array<{
-      _id: Id<"calendarSources">;
-      type: string;
-      calendarRefreshToken?: string;
-    }> = await ctx.runQuery(api.calendarSources.getForProfile, {
-      profileId: args.profileId,
-    });
-    const googleSource = sources.find((s) => s.type === "google");
+    const googleSource: Doc<"calendarSources"> | null = await ctx.runQuery(
+      internal.calendarSources.getOwnedGoogleSource,
+      {
+        profileId: args.profileId,
+        authUserId: identity.tokenIdentifier,
+      }
+    );
     if (!googleSource || !googleSource.calendarRefreshToken) {
       throw new Error("No Google calendar source with refresh token found");
     }

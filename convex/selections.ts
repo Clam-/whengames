@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query, MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { Id } from "./_generated/dataModel";
+import { Doc, Id } from "./_generated/dataModel";
 
 const DEFAULT_DISCORD_DEBOUNCE_MS = 5 * 60 * 1000;
 
@@ -72,20 +72,73 @@ async function isProfileBlocked(
   return blocked !== null;
 }
 
-// Helper: check if participation is closed and user is not creator
-// callerProfileId allows a creator to act on behalf of another user
+type SelectionAccess = {
+  schedule: Doc<"schedules">;
+  actorProfileId: Id<"userProfiles">;
+  targetProfileId: Id<"userProfiles">;
+  actorIsCreator: boolean;
+};
+
+async function getActorProfileId(
+  ctx: MutationCtx,
+  anonymousId: string | undefined
+): Promise<Id<"userProfiles"> | null> {
+  const identity = await ctx.auth.getUserIdentity();
+  if (identity) {
+    const authProfile = await ctx.db
+      .query("userProfiles")
+      .withIndex("by_authUserId", (q) =>
+        q.eq("authUserId", identity.tokenIdentifier)
+      )
+      .unique();
+    return authProfile?._id ?? null;
+  }
+
+  if (!anonymousId) return null;
+  const anonymousProfile = await ctx.db
+    .query("userProfiles")
+    .withIndex("by_anonymousId", (q) => q.eq("anonymousId", anonymousId))
+    .unique();
+  if (!anonymousProfile || anonymousProfile.authUserId) return null;
+  return anonymousProfile._id;
+}
+
+async function getSelectionAccess(
+  ctx: MutationCtx,
+  scheduleId: Id<"schedules">,
+  targetProfileId: Id<"userProfiles">,
+  anonymousId: string | undefined
+): Promise<SelectionAccess | null> {
+  const [schedule, targetProfile, actorProfileId] = await Promise.all([
+    ctx.db.get(scheduleId),
+    ctx.db.get(targetProfileId),
+    getActorProfileId(ctx, anonymousId),
+  ]);
+  if (!schedule || !targetProfile || !actorProfileId) return null;
+
+  const actorIsCreator = schedule.creatorProfileId === actorProfileId;
+  if (actorProfileId !== targetProfileId && !actorIsCreator) return null;
+
+  return {
+    schedule,
+    actorProfileId,
+    targetProfileId,
+    actorIsCreator,
+  };
+}
+
+// Helper: check if participation is closed and actor is not creator
 async function isParticipationDenied(
   ctx: MutationCtx,
   scheduleId: Id<"schedules">,
   profileId: Id<"userProfiles">,
-  callerProfileId?: Id<"userProfiles">
+  actorIsCreator: boolean
 ): Promise<boolean> {
   const schedule = await ctx.db.get(scheduleId);
   if (!schedule) return true;
 
-  // Creator is always allowed (either as themselves or acting on behalf)
-  if (schedule.creatorProfileId === profileId) return false;
-  if (callerProfileId && schedule.creatorProfileId === callerProfileId) return false;
+  // Creator is always allowed (either as themselves or acting on behalf).
+  if (schedule.creatorProfileId === profileId || actorIsCreator) return false;
 
   // Check if participation is closed
   if (schedule.acceptParticipation === false) return true;
@@ -170,25 +223,29 @@ export const set = mutation({
     ),
     isException: v.optional(v.boolean()),
     exceptionDate: v.optional(v.string()),
-    callerProfileId: v.optional(v.id("userProfiles")),
+    anonymousId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const access = await getSelectionAccess(
+      ctx,
+      args.scheduleId,
+      args.profileId,
+      args.anonymousId
+    );
+    if (!access) return null;
+
     // Guard: reject if participation denied (closed or blocked)
-    if (await isParticipationDenied(ctx, args.scheduleId, args.profileId, args.callerProfileId)) {
+    if (await isParticipationDenied(ctx, args.scheduleId, args.profileId, access.actorIsCreator)) {
       return null;
     }
 
     // Guard: reject nominations on disallowed cells (creator auto-allows)
-    const schedule = await ctx.db.get(args.scheduleId);
+    const schedule = access.schedule;
     if (
       schedule &&
       isSlotDisallowed(schedule.disallowedSlots, args.dayKey, args.timeSlot)
     ) {
-      const callerIsCreator =
-        schedule.creatorProfileId === args.profileId ||
-        (args.callerProfileId !== undefined &&
-          schedule.creatorProfileId === args.callerProfileId);
-      if (callerIsCreator) {
+      if (access.actorIsCreator) {
         await ctx.db.patch(args.scheduleId, {
           disallowedSlots: (schedule.disallowedSlots || []).filter(
             (s) => !(s.dayKey === args.dayKey && s.timeSlot === args.timeSlot)
@@ -322,25 +379,29 @@ export const remove = mutation({
     timeSlot: v.string(),
     isException: v.optional(v.boolean()),
     exceptionDate: v.optional(v.string()),
-    callerProfileId: v.optional(v.id("userProfiles")),
+    anonymousId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const access = await getSelectionAccess(
+      ctx,
+      args.scheduleId,
+      args.profileId,
+      args.anonymousId
+    );
+    if (!access) return;
+
     // Guard: reject if participation denied (closed or blocked)
-    if (await isParticipationDenied(ctx, args.scheduleId, args.profileId, args.callerProfileId)) {
+    if (await isParticipationDenied(ctx, args.scheduleId, args.profileId, access.actorIsCreator)) {
       return;
     }
 
     // Guard: reject changes on disallowed cells (skip for creator)
-    const schedule = await ctx.db.get(args.scheduleId);
+    const schedule = access.schedule;
     if (
       schedule &&
       isSlotDisallowed(schedule.disallowedSlots, args.dayKey, args.timeSlot)
     ) {
-      const callerIsCreator =
-        schedule.creatorProfileId === args.profileId ||
-        (args.callerProfileId !== undefined &&
-          schedule.creatorProfileId === args.callerProfileId);
-      if (!callerIsCreator) {
+      if (!access.actorIsCreator) {
         return;
       }
     }
@@ -454,25 +515,28 @@ export const batchSet = mutation({
         exceptionDate: v.optional(v.string()),
       })
     ),
-    callerProfileId: v.optional(v.id("userProfiles")),
+    anonymousId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const access = await getSelectionAccess(
+      ctx,
+      args.scheduleId,
+      args.profileId,
+      args.anonymousId
+    );
+    if (!access) return;
+
     // Guard: reject if participation denied (closed or blocked)
-    if (await isParticipationDenied(ctx, args.scheduleId, args.profileId, args.callerProfileId)) {
+    if (await isParticipationDenied(ctx, args.scheduleId, args.profileId, access.actorIsCreator)) {
       return;
     }
 
     // Load schedule once to check disallowed slots and date range
-    const schedule = await ctx.db.get(args.scheduleId);
+    const schedule = access.schedule;
     let disallowed = schedule?.disallowedSlots;
 
     // Creator bypass: auto-allow disallowed cells being nominated, skip check for all
-    const callerIsCreator = schedule && (
-      schedule.creatorProfileId === args.profileId ||
-      (args.callerProfileId !== undefined &&
-        schedule.creatorProfileId === args.callerProfileId)
-    );
-    if (callerIsCreator && disallowed && disallowed.length > 0) {
+    if (access.actorIsCreator && disallowed && disallowed.length > 0) {
       const slotsToAllow = args.selections.filter(
         (s) => s.state !== "blank" && isSlotDisallowed(disallowed, s.dayKey, s.timeSlot)
       );
@@ -652,8 +716,17 @@ export const clearForProfile = mutation({
   args: {
     scheduleId: v.id("schedules"),
     profileId: v.id("userProfiles"),
+    anonymousId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const access = await getSelectionAccess(
+      ctx,
+      args.scheduleId,
+      args.profileId,
+      args.anonymousId
+    );
+    if (!access) return 0;
+
     // If linked to a saved availability, unlink without copying back
     const link = await getAvailabilityLink(
       ctx,
