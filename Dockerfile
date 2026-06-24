@@ -1,13 +1,13 @@
-# Stage 1: Build
-FROM node:22-alpine AS builder
+# Stage 1: Build the architecture-independent frontend on the native platform
+FROM --platform=$BUILDPLATFORM node:22-alpine AS builder
 
 # Enable corepack for pnpm
 RUN corepack enable pnpm
 
 WORKDIR /app
 
-# Copy package files
-COPY package.json pnpm-lock.yaml ./
+# Copy package files and pnpm dependency-build policy
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile
