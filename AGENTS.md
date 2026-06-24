@@ -12,4 +12,4 @@ Convex agent skills for common tasks can be installed by running
 
 <!-- convex-ai-end -->
 
-Do not run `pnpm build` directly as it will stall in sandbox. Instead always use `tsc -b --pretty false && vite build`
+Do not run `pnpm` commands in sandbox mode. They will stall on network access. Always make sure to call them with network elevation.

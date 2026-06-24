@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { getConfig } from "../config";
@@ -37,8 +37,12 @@ export function CalendarSyncSettings({ profileId, userEmail }: Props) {
   const updateSelectedCalendars = useMutation(api.calendarSources.updateSelectedCalendars);
   const saveIcsUrlMut = useMutation(api.calendarSources.saveIcsUrl);
   const removeSourceMut = useMutation(api.calendarSources.removeSource);
+  const fetchGoogleCalendars = useAction(api.calendarSources.fetchGoogleCalendars);
 
   const [icsUrl, setIcsUrl] = useState("");
+  const [calendarListLoading, setCalendarListLoading] = useState(false);
+  const [calendarListError, setCalendarListError] = useState<string | null>(null);
+  const refreshedSourceId = useRef<string | null>(null);
 
   const googleSource = (sources as CalendarSource[] | undefined)?.find((s: CalendarSource) => s.type === "google");
   const icsSource = (sources as CalendarSource[] | undefined)?.find((s: CalendarSource) => s.type === "ics");
@@ -47,21 +51,63 @@ export function CalendarSyncSettings({ profileId, userEmail }: Props) {
     const flag = sessionStorage.getItem(CALENDAR_CONNECTED_KEY);
     if (flag) {
       sessionStorage.removeItem(CALENDAR_CONNECTED_KEY);
+      if (flag.startsWith("error:")) {
+        const error = flag.substring("error:".length);
+        setCalendarListError(
+          error === "calendar_list_failed"
+            ? "Google authorization succeeded, but its calendar list could not be loaded. Check that the Google Calendar API is enabled for this project, then reconnect."
+            : `Google Calendar connection failed (${error}).`,
+        );
+      }
     }
   }, []);
+
+  const refreshCalendarList = useCallback(async () => {
+    setCalendarListLoading(true);
+    setCalendarListError(null);
+    try {
+      await fetchGoogleCalendars({ profileId });
+    } catch (error) {
+      console.error("Failed to fetch Google calendars:", error);
+      setCalendarListError(
+        "Could not load calendars from Google. Check that the Google Calendar API is enabled, then try again.",
+      );
+    } finally {
+      setCalendarListLoading(false);
+    }
+  }, [fetchGoogleCalendars, profileId]);
+
+  useEffect(() => {
+    if (
+      !googleSource ||
+      (googleSource.availableCalendars?.length ?? 0) > 0 ||
+      refreshedSourceId.current === googleSource._id
+    ) {
+      return;
+    }
+
+    refreshedSourceId.current = googleSource._id;
+    void refreshCalendarList();
+  }, [googleSource, refreshCalendarList]);
 
   const handleConnectGoogle = useCallback(() => {
     const config = getConfig();
     const nonce = crypto.randomUUID();
     sessionStorage.setItem(CALENDAR_NONCE_KEY, nonce);
-    const currentPath = window.location.pathname + window.location.search + window.location.hash;
+    const returnUrl = new URL(window.location.href);
+    returnUrl.searchParams.set("settings", "calendar");
+    const currentPath =
+      returnUrl.pathname + returnUrl.search + returnUrl.hash;
     const state = `${nonce}|${currentPath}`;
 
     const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
     authUrl.searchParams.set("client_id", config.GOOGLE_CLIENT_ID);
     authUrl.searchParams.set("redirect_uri", `${config.CONVEX_SITE_URL}/auth/google/calendar-callback`);
     authUrl.searchParams.set("response_type", "code");
-    authUrl.searchParams.set("scope", "https://www.googleapis.com/auth/calendar.readonly");
+    authUrl.searchParams.set(
+      "scope",
+      "openid email https://www.googleapis.com/auth/calendar.readonly",
+    );
     authUrl.searchParams.set("include_granted_scopes", "true");
     authUrl.searchParams.set("access_type", "offline");
     authUrl.searchParams.set("prompt", "consent");
@@ -153,8 +199,27 @@ export function CalendarSyncSettings({ profileId, userEmail }: Props) {
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-gray-400 dark:text-slate-500">
-                No calendars found. Try disconnecting and reconnecting.
+              <div className="space-y-2">
+                <p className="text-xs text-gray-400 dark:text-slate-500">
+                  {calendarListLoading
+                    ? "Loading calendars from Google..."
+                    : "No calendars were returned by Google."}
+                </p>
+                {!calendarListLoading && (
+                  <button
+                    type="button"
+                    onClick={() => void refreshCalendarList()}
+                    className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                  >
+                    Try loading calendars again
+                  </button>
+                )}
+              </div>
+            )}
+
+            {calendarListError && (
+              <p className="text-xs text-red-600 dark:text-rose-400">
+                {calendarListError}
               </p>
             )}
 

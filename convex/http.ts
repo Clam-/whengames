@@ -364,24 +364,39 @@ http.route({
       googleUserId = payload.sub as string;
     }
 
-    // Fetch the user's calendar list using the access token
-    let availableCalendars: { id: string; summary: string }[] = [];
+    // Fetch the user's calendar list using the access token. A successful
+    // connection must include this list; otherwise the UI cannot select which
+    // calendars to sync.
+    let availableCalendars: { id: string; summary: string }[];
     try {
       const calListRes = await fetch(
         "https://www.googleapis.com/calendar/v3/users/me/calendarList",
         { headers: { Authorization: `Bearer ${tokens.access_token}` } },
       );
-      if (calListRes.ok) {
-        const calListData = (await calListRes.json()) as {
-          items?: Array<{ id: string; summary: string }>;
-        };
-        availableCalendars = (calListData.items ?? []).map((c) => ({
-          id: c.id,
-          summary: c.summary,
-        }));
+      if (!calListRes.ok) {
+        console.error(
+          "Google calendar list fetch failed:",
+          calListRes.status,
+          await calListRes.text(),
+        );
+        throw new Error(`Google calendar list returned ${calListRes.status}`);
       }
-    } catch {
-      // Calendar list fetch is best-effort; sync will retry later
+
+      const calListData = (await calListRes.json()) as {
+        items?: Array<{ id: string; summary: string }>;
+      };
+      availableCalendars = (calListData.items ?? []).map((c) => ({
+        id: c.id,
+        summary: c.summary,
+      }));
+    } catch (error) {
+      console.error("Unable to load Google calendar list:", error);
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: `${siteUrl}/auth/calendar-callback#error=calendar_list_failed&state=${encodeURIComponent(state)}`,
+        },
+      });
     }
 
     await ctx.runMutation(internal.calendarSources.storeGoogleCalendarToken, {

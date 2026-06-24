@@ -1,17 +1,35 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { useLocation } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { api } from "../../convex/_generated/api";
 import { useGoogleAuth } from "../lib/googleAuth";
 import { useAnonymousUser } from "../hooks/useAnonymousUser";
 import { UserSettingsModal } from "./UserSettingsModal";
 import { AnimatedTitle } from "./AnimatedTitle";
 
+const CALENDAR_REOPEN_SETTINGS_KEY =
+  "whengames_reopen_settings_after_calendar_oauth";
+
 export function Header() {
   const { isAuthenticated, isLoading, signIn, signOut } = useGoogleAuth();
   const { anonymousId, hasInteracted, clearAnonymousUser } = useAnonymousUser();
   const location = useLocation();
+  const navigate = useNavigate();
   const [showSettings, setShowSettings] = useState(false);
+  const settingsRequested =
+    new URLSearchParams(location.search).get("settings") === "calendar";
+
+  useEffect(() => {
+    const reopenAfterCalendarOAuth =
+      sessionStorage.getItem(CALENDAR_REOPEN_SETTINGS_KEY) === "true";
+    if (reopenAfterCalendarOAuth) {
+      sessionStorage.removeItem(CALENDAR_REOPEN_SETTINGS_KEY);
+    }
+
+    if (settingsRequested || reopenAfterCalendarOAuth) {
+      setShowSettings(true);
+    }
+  }, [settingsRequested]);
 
   // Always pass anonymousId so the query can find the profile during the
   // transition window between SSO completion and profile linking.
@@ -39,6 +57,19 @@ export function Header() {
 
   const handleLogout = () => {
     signOut();
+  };
+
+  const handleCloseSettings = () => {
+    setShowSettings(false);
+    if (!settingsRequested) return;
+
+    const params = new URLSearchParams(location.search);
+    params.delete("settings");
+    const search = params.toString();
+    navigate(
+      `${location.pathname}${search ? `?${search}` : ""}${location.hash}`,
+      { replace: true },
+    );
   };
 
   return (
@@ -127,7 +158,7 @@ export function Header() {
         <UserSettingsModal
           profile={profile}
           anonymousId={anonymousId || undefined}
-          onClose={() => setShowSettings(false)}
+          onClose={handleCloseSettings}
         />
       )}
     </>

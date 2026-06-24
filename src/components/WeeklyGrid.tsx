@@ -959,6 +959,11 @@ export function WeeklyGrid({
                         }
                       }}
                       className={cellClasses}
+                      title={
+                        cellCalendarSynced
+                          ? "Unavailable due to a synced calendar entry"
+                          : undefined
+                      }
                       onMouseDown={(e) =>
                         inRange && !cellDisabledForInteraction
                           ? handleMouseDown(e, dayIndex, timeIndex)

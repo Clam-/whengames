@@ -2,6 +2,8 @@ import { useEffect } from "react";
 
 const CALENDAR_NONCE_KEY = "whengames_calendar_oauth_nonce";
 const CALENDAR_CONNECTED_KEY = "whengames_calendar_just_connected";
+const CALENDAR_REOPEN_SETTINGS_KEY =
+  "whengames_reopen_settings_after_calendar_oauth";
 
 export function CalendarCallbackPage() {
   useEffect(() => {
@@ -29,6 +31,7 @@ export function CalendarCallbackPage() {
     } else if (error) {
       sessionStorage.setItem(CALENDAR_CONNECTED_KEY, `error:${error}`);
     }
+    sessionStorage.setItem(CALENDAR_REOPEN_SETTINGS_KEY, "true");
 
     window.location.replace(redirect || "/");
   }, []);
