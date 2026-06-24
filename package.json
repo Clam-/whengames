@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "packageManager": "pnpm@10.33.3",
+  "packageManager": "pnpm@11.9.0",
   "scripts": {
     "dev": "concurrently -n convex,vite -c cyan,magenta \"convex dev\" \"vite\"",
     "build": "tsc -b && vite build",
@@ -16,26 +16,21 @@
     "docker:deploy": "pnpm docker:build && pnpm docker:push"
   },
   "dependencies": {
-    "convex": "^1.39.1",
+    "convex": "^1.41.0",
     "luxon": "3.7.2",
-    "react": "19.2.5",
-    "react-dom": "19.2.5",
-    "react-router": "7.14.2"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-router": "8.0.1"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "4.2.4",
-    "@types/luxon": "3.7.1",
-    "@types/node": "^25.9.1",
-    "@types/react": "^19.2.15",
+    "@tailwindcss/vite": "4.3.1",
+    "@types/luxon": "3.7.2",
+    "@types/node": "^26.0.0",
+    "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "concurrently": "^9.2.1",
-    "tailwindcss": "4.2.4",
+    "concurrently": "^10.0.3",
+    "tailwindcss": "4.3.1",
     "typescript": "~6.0.3",
-    "vite": "8.0.10"
+    "vite": "8.0.16"
   }
 }
