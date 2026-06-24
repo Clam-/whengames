@@ -211,6 +211,12 @@ export default defineSchema({
   })
     .index("by_profile_schedule", ["profileId", "scheduleId"])
     .index("by_profile_event", ["profileId", "externalEventId"])
+    .index("by_profile_schedule_dayKey_timeSlot", [
+      "profileId",
+      "scheduleId",
+      "dayKey",
+      "timeSlot",
+    ])
     .index("by_profile_schedule_externalEventId_dayKey_timeSlot", [
       "profileId",
       "scheduleId",

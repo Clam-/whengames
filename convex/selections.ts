@@ -266,6 +266,120 @@ async function getExistingSelectionsForCell(
   return [...missingExceptionFlag, ...falseExceptionFlag];
 }
 
+async function getCalendarOverridesForCell(
+  ctx: MutationCtx,
+  scheduleId: Id<"schedules">,
+  profileId: Id<"userProfiles">,
+  dayKey: string,
+  timeSlot: string
+) {
+  return await ctx.db
+    .query("calendarOverrides")
+    .withIndex("by_profile_schedule_dayKey_timeSlot", (q) =>
+      q
+        .eq("profileId", profileId)
+        .eq("scheduleId", scheduleId)
+        .eq("dayKey", dayKey)
+        .eq("timeSlot", timeSlot)
+    )
+    .take(20);
+}
+
+async function createCalendarOverrides(
+  ctx: MutationCtx,
+  scheduleId: Id<"schedules">,
+  profileId: Id<"userProfiles">,
+  dayKey: string,
+  timeSlot: string,
+  calendarSelections: Doc<"selections">[]
+) {
+  for (const selection of calendarSelections) {
+    if (!selection.externalEventId) continue;
+
+    const overrideExists = await ctx.db
+      .query("calendarOverrides")
+      .withIndex("by_profile_schedule_externalEventId_dayKey_timeSlot", (q) =>
+        q
+          .eq("profileId", profileId)
+          .eq("scheduleId", scheduleId)
+          .eq("externalEventId", selection.externalEventId!)
+          .eq("dayKey", dayKey)
+          .eq("timeSlot", timeSlot)
+      )
+      .first();
+
+    if (!overrideExists) {
+      await ctx.db.insert("calendarOverrides", {
+        profileId,
+        scheduleId,
+        externalEventId: selection.externalEventId,
+        dayKey,
+        timeSlot,
+      });
+    }
+  }
+}
+
+async function restoreCalendarBaseline(
+  ctx: MutationCtx,
+  args: {
+    scheduleId: Id<"schedules">;
+    profileId: Id<"userProfiles">;
+    dayKey: string;
+    timeSlot: string;
+    timezone?: string;
+    existing: Doc<"selections">[];
+  }
+): Promise<boolean> {
+  const overrides = await getCalendarOverridesForCell(
+    ctx,
+    args.scheduleId,
+    args.profileId,
+    args.dayKey,
+    args.timeSlot
+  );
+  const calendarSelection = args.existing.find(
+    (selection) =>
+      selection.source === "calendar" && selection.externalEventId !== undefined
+  );
+  const externalEventId =
+    calendarSelection?.externalEventId ?? overrides[0]?.externalEventId;
+
+  if (!externalEventId) return false;
+
+  for (const override of overrides) {
+    await ctx.db.delete(override._id);
+  }
+
+  const primary = calendarSelection ?? args.existing[0];
+  if (primary) {
+    await ctx.db.patch(primary._id, {
+      state: "cant-do",
+      source: "calendar",
+      externalEventId,
+      ...(args.timezone ? { timezone: args.timezone } : {}),
+    });
+    for (const selection of args.existing) {
+      if (selection._id !== primary._id) {
+        await ctx.db.delete(selection._id);
+      }
+    }
+  } else if (args.timezone) {
+    await ctx.db.insert("selections", {
+      scheduleId: args.scheduleId,
+      profileId: args.profileId,
+      dayKey: args.dayKey,
+      timeSlot: args.timeSlot,
+      timezone: args.timezone,
+      state: "cant-do",
+      source: "calendar",
+      externalEventId,
+    });
+  }
+
+  return true;
+}
+
 function compactSelections(selections: BatchSelection[]): BatchSelection[] {
   const byCell = new Map<string, BatchSelection>();
   for (const selection of selections) {
@@ -422,44 +536,34 @@ export const set = mutation({
       args.exceptionDate
     );
 
-    // Create override if overwriting a calendar-synced selection
-    for (const sel of existing) {
-      if (sel.source === "calendar" && sel.externalEventId) {
-        const overrideExists = await ctx.db
-          .query("calendarOverrides")
-          .withIndex("by_profile_schedule_externalEventId_dayKey_timeSlot", (q) =>
-            q
-              .eq("profileId", args.profileId)
-              .eq("scheduleId", args.scheduleId)
-              .eq("externalEventId", sel.externalEventId!)
-              .eq("dayKey", args.dayKey)
-              .eq("timeSlot", args.timeSlot)
-          )
-          .first();
-        if (!overrideExists) {
-          await ctx.db.insert("calendarOverrides", {
-            profileId: args.profileId,
-            scheduleId: args.scheduleId,
-            externalEventId: sel.externalEventId,
-            dayKey: args.dayKey,
-            timeSlot: args.timeSlot,
-          });
-        }
-      }
-    }
+    const calendarSelections = existing.filter(
+      (selection) =>
+        selection.source === "calendar" &&
+        selection.externalEventId !== undefined
+    );
+    await createCalendarOverrides(
+      ctx,
+      args.scheduleId,
+      args.profileId,
+      args.dayKey,
+      args.timeSlot,
+      calendarSelections
+    );
 
     let resultId: Id<"selections">;
     if (existing.length > 0) {
-      await ctx.db.patch(existing[0]._id, {
+      const primary = calendarSelections[0] ?? existing[0];
+      await ctx.db.patch(primary._id, {
         state: args.state,
         timezone: args.timezone,
-        source: "manual",
-        externalEventId: undefined,
+        ...(calendarSelections.length === 0 ? { source: "manual" as const } : {}),
       });
-      for (let i = 1; i < existing.length; i++) {
-        await ctx.db.delete(existing[i]._id);
+      for (const selection of existing) {
+        if (selection._id !== primary._id) {
+          await ctx.db.delete(selection._id);
+        }
       }
-      resultId = existing[0]._id;
+      resultId = primary._id;
     } else {
       resultId = await ctx.db.insert("selections", {
         scheduleId: args.scheduleId,
@@ -489,6 +593,7 @@ export const remove = mutation({
     timeSlot: v.string(),
     isException: v.optional(v.boolean()),
     exceptionDate: v.optional(v.string()),
+    timezone: v.optional(v.string()),
     anonymousId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -558,30 +663,20 @@ export const remove = mutation({
       args.exceptionDate
     );
 
-    // Create override if removing a calendar-synced selection
-    for (const record of existing) {
-      if (record.source === "calendar" && record.externalEventId) {
-        const overrideExists = await ctx.db
-          .query("calendarOverrides")
-          .withIndex("by_profile_schedule_externalEventId_dayKey_timeSlot", (q) =>
-            q
-              .eq("profileId", args.profileId)
-              .eq("scheduleId", args.scheduleId)
-              .eq("externalEventId", record.externalEventId!)
-              .eq("dayKey", args.dayKey)
-              .eq("timeSlot", args.timeSlot)
-          )
-          .first();
-        if (!overrideExists) {
-          await ctx.db.insert("calendarOverrides", {
-            profileId: args.profileId,
-            scheduleId: args.scheduleId,
-            externalEventId: record.externalEventId,
-            dayKey: args.dayKey,
-            timeSlot: args.timeSlot,
-          });
-        }
-      }
+    if (
+      await restoreCalendarBaseline(ctx, {
+        scheduleId: args.scheduleId,
+        profileId: args.profileId,
+        dayKey: args.dayKey,
+        timeSlot: args.timeSlot,
+        timezone: args.timezone,
+        existing,
+      })
+    ) {
+      await notifyDiscordIfLockedImpacted(ctx, args.scheduleId, [
+        { dayKey: args.dayKey, timeSlot: args.timeSlot },
+      ]);
+      return;
     }
 
     for (const record of existing) {
@@ -615,16 +710,43 @@ async function applySelectionCell(
   );
 
   if (sel.state === "blank") {
-    for (const record of existing) {
-      await ctx.db.delete(record._id);
+    const restoredCalendarBaseline = await restoreCalendarBaseline(ctx, {
+      scheduleId: args.scheduleId,
+      profileId: args.profileId,
+      dayKey: sel.dayKey,
+      timeSlot: sel.timeSlot,
+      timezone: args.timezone,
+      existing,
+    });
+    if (!restoredCalendarBaseline) {
+      for (const record of existing) {
+        await ctx.db.delete(record._id);
+      }
     }
   } else if (existing.length > 0) {
-    await ctx.db.patch(existing[0]._id, {
+    const calendarSelections = existing.filter(
+      (selection) =>
+        selection.source === "calendar" &&
+        selection.externalEventId !== undefined
+    );
+    await createCalendarOverrides(
+      ctx,
+      args.scheduleId,
+      args.profileId,
+      sel.dayKey,
+      sel.timeSlot,
+      calendarSelections
+    );
+    const primary = calendarSelections[0] ?? existing[0];
+    await ctx.db.patch(primary._id, {
       state: sel.state,
       timezone: args.timezone,
+      ...(calendarSelections.length === 0 ? { source: "manual" as const } : {}),
     });
-    for (let i = 1; i < existing.length; i++) {
-      await ctx.db.delete(existing[i]._id);
+    for (const selection of existing) {
+      if (selection._id !== primary._id) {
+        await ctx.db.delete(selection._id);
+      }
     }
   } else {
     await ctx.db.insert("selections", {

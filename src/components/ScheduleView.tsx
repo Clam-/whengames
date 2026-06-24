@@ -172,6 +172,7 @@ export function ScheduleView() {
           timeSlot,
           isException,
           exceptionDate,
+          timezone,
           anonymousId: callerAnonymousId,
         });
       } else {

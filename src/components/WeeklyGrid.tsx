@@ -333,7 +333,22 @@ export function WeeklyGrid({
   );
 
   // Get the next state in auto mode cycle
-  const getNextAutoState = (current: CellState): CellState => {
+  const getNextAutoState = (
+    current: CellState,
+    hasCalendarBaseline: boolean
+  ): CellState => {
+    if (hasCalendarBaseline) {
+      switch (current) {
+        case "blank":
+        case "cant-do":
+          return "can-do";
+        case "can-do":
+          return "maybe";
+        case "maybe":
+          return "blank";
+      }
+    }
+
     switch (current) {
       case "blank":
         return "can-do";
@@ -365,21 +380,24 @@ export function WeeklyGrid({
       } else {
         const date = weekDates[dayIndex];
         const dow = (weekStartDay + dayIndex) % 7;
-        const isCurrentWeek = weekOffset === 0;
+        const exceptionDate = date.toISODate()!;
+        const exceptionCellKey = `exc:${exceptionDate}|${timeSlot}`;
 
-        if (!isCurrentWeek) {
+        // Target the exact dated exception when one is currently displayed.
+        // Calendar-synced entries are exceptions even in the current week.
+        if (weekOffset !== 0 || myCellStates.has(exceptionCellKey)) {
           return {
             dayKey: String(dow),
             timeSlot,
             isException: true,
-            exceptionDate: date.toISODate()!,
+            exceptionDate,
           };
         }
 
         return { dayKey: String(dow), timeSlot };
       }
     },
-    [schedule.type, weekDates, weekStartDay, weekOffset]
+    [schedule.type, weekDates, weekStartDay, weekOffset, myCellStates]
   );
 
   // Check if a cell is disallowed
@@ -462,10 +480,13 @@ export function WeeklyGrid({
 
       // Regular mode or creator nominate mode — standard selection behavior
       const currentState = getCellState(dayIndex, timeIndex);
+      const hasCalendarBaseline = calendarSyncedCells.has(
+        getCellKey(dayIndex, timeIndex)
+      );
       let newState: CellState;
 
       if (selectMode === "auto") {
-        newState = getNextAutoState(currentState);
+        newState = getNextAutoState(currentState, hasCalendarBaseline);
       } else {
         newState = currentState === selectMode ? "blank" : selectMode;
       }
@@ -485,6 +506,8 @@ export function WeeklyGrid({
       selectMode,
       allowMode,
       getCellState,
+      getCellKey,
+      calendarSyncedCells,
       toStorageKeys,
       onCellChange,
       onCreatorSlotChange,
@@ -526,8 +549,14 @@ export function WeeklyGrid({
         // Regular / nominate mode
         const currentState = getCellState(dayIndex, timeIndex);
         if (selectMode === "auto") {
-          dragActionRef.current =
-            currentState === "blank" ? "can-do" : currentState;
+          const hasCalendarBaseline = calendarSyncedCells.has(
+            getCellKey(dayIndex, timeIndex)
+          );
+          dragActionRef.current = hasCalendarBaseline
+            ? getNextAutoState(currentState, true)
+            : currentState === "blank"
+              ? "can-do"
+              : currentState;
         } else {
           dragActionRef.current = selectMode;
         }
@@ -543,6 +572,8 @@ export function WeeklyGrid({
     [
       canInteract,
       getCellState,
+      getCellKey,
+      calendarSyncedCells,
       selectMode,
       isCreator,
       canLock,
@@ -961,7 +992,9 @@ export function WeeklyGrid({
                       className={cellClasses}
                       title={
                         cellCalendarSynced
-                          ? "Unavailable due to a synced calendar entry"
+                          ? myState === "cant-do"
+                            ? "Unavailable due to a synced calendar entry. Click to override."
+                            : "Overrides a synced calendar entry. Clear to restore Can't Do."
                           : undefined
                       }
                       onMouseDown={(e) =>
